@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "Which tab is selected? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: Which tab is selected?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"The selected tab is \\\"ALL\\\".\", \"ui_elements\": [{\"bounds\": [0.0, 105.0, 135.0, 168.0], \"text\": \"ALL\", \"vh_index\": 58}]}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"The selected tab is \\\"ALL\\\".\", \"ui_elements\": [{\"bounds\": [0.0, 105.0, 135.0, 168.0], \"text\": \"ALL\", \"vh_index\": 58}]}]",
       "source_index": 16,
       "hf_id": "50964",
       "image_path": "dataset/screenshots/images/screenshots_0015.jpg",

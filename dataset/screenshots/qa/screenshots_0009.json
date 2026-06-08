@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "To connect with what app, log in to your Facebook account? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: To connect with what app, log in to your Facebook account?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"The app name is \\\"WEAR\\\".\", \"ui_elements\": [{\"bounds\": [292.0, 282.0, 352.0, 307.0], \"text\": \"WEAR\", \"vh_index\": -1}]}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"The app name is \\\"WEAR\\\".\", \"ui_elements\": [{\"bounds\": [292.0, 282.0, 352.0, 307.0], \"text\": \"WEAR\", \"vh_index\": -1}]}]",
       "source_index": 10,
       "hf_id": "50973",
       "image_path": "dataset/screenshots/images/screenshots_0009.jpg",

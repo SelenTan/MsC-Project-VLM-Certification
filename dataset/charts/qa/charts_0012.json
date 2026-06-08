@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "How many people survived the shootings in Sweden? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible chart title, axes, labels, legend, and plotted values needed for the source ChartQA answer. Source question: How many people survived the shootings in Sweden?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [\"117\"]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[\"117\"]",
       "source_index": 12,
       "hf_id": "HuggingFaceM4/ChartQA:train:12",
       "image_path": "dataset/charts/images/charts_0012.jpg",

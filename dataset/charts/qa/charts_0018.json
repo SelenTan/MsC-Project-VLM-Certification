@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What was the average number of mobile games played per day in the U.S. as of April 2016? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible chart title, axes, labels, legend, and plotted values needed for the source ChartQA answer. Source question: What was the average number of mobile games played per day in the U.S. as of April 2016?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [\"1.3\"]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[\"1.3\"]",
       "source_index": 18,
       "hf_id": "HuggingFaceM4/ChartQA:train:18",
       "image_path": "dataset/charts/images/charts_0018.jpg",

@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "How many stars are given to \"The Great Northern\"? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: How many stars are given to \"The Great Northern\"?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"The stars given to \\\"The Great Northern\\\" are 5.\", \"ui_elements\": [{\"bounds\": [42.0, 582.0, 1038.0, 629.0], \"text\": \"5\", \"vh_index\": 21}]}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"The stars given to \\\"The Great Northern\\\" are 5.\", \"ui_elements\": [{\"bounds\": [42.0, 582.0, 1038.0, 629.0], \"text\": \"5\", \"vh_index\": 21}]}]",
       "source_index": 5,
       "hf_id": "51293",
       "image_path": "dataset/screenshots/images/screenshots_0004.jpg",

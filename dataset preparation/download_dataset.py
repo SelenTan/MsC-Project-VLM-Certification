@@ -347,10 +347,7 @@ def build_evaluation_items(
             target="robustness",
             prompt=f"{source_question} If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
             expected_evidence=common_evidence,
-            expected_answer_or_behavior=(
-                f"Return the same answer as the visual factuality item when evidence is preserved: "
-                f"{source_answer}. State uncertainty only when the required evidence is not readable."
-            ),
+            expected_answer_or_behavior=source_answer,
             source_index=source_index,
             hf_id=hf_id,
             image_path=image_path,

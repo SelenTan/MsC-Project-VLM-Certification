@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "Which number is selected for TD recommendation? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: Which number is selected for TD recommendation?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"<no answer>\", \"ui_elements\": []}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"<no answer>\", \"ui_elements\": []}]",
       "source_index": 1,
       "hf_id": "51221",
       "image_path": "dataset/screenshots/images/screenshots_0001.jpg",

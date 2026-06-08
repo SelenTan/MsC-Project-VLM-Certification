@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What brand was in second place in the United States fast lubes market? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible chart title, axes, labels, legend, and plotted values needed for the source ChartQA answer. Source question: What brand was in second place in the United States fast lubes market?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [\"Valvoline\"]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[\"Valvoline\"]",
       "source_index": 9,
       "hf_id": "HuggingFaceM4/ChartQA:train:9",
       "image_path": "dataset/charts/images/charts_0009.jpg",

@@ -16,6 +16,7 @@ from ai_checker import call_checker, load_annotation_guide, require_local_endpoi
 from artifacts import (
     apply_checker_results,
     apply_human_label_sheet,
+    copy_named_dataset_snapshot,
     create_run_dir,
     default_run_name,
     export_run_artifacts,
@@ -338,6 +339,22 @@ def archive_and_maybe_reset(
         write_json(run_dir / "reset_log.json", reset_log)
 
 
+def emergency_snapshot_and_reset(run_dir: Path, exc: BaseException) -> None:
+    """Preserve dirty dataset state after an unexpected failure, then reset mutable fields."""
+    copy_named_dataset_snapshot(PROJECT_ROOT, DATASET_DIR, run_dir, "dataset_snapshot_error")
+    write_json(
+        run_dir / "error_state.json",
+        {
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "dataset_snapshot": "dataset_snapshot_error",
+        },
+    )
+    if RESET_DATASET_AFTER_ARCHIVE:
+        reset_log = reset_dataset_fields(PROJECT_ROOT, DATASET_DIR)
+        write_json(run_dir / "reset_log_error.json", reset_log)
+
+
 def main() -> None:
     """Run checker validation, pause for human labels, calculate certification, archive, and reset."""
     run_name = RUN_NAME or default_run_name(TARGET_MODEL_NAME)
@@ -349,8 +366,11 @@ def main() -> None:
     require_local_endpoint(CHECKER_INTERNAL_ENDPOINT, ALLOW_NON_LOCAL_CHECKER)
     target_server = maybe_start_target_server(run_dir)
     checker_server = ManagedServer(process=None, log_path=None)
+    dataset_dirty = False
+    dataset_archived = False
     try:
         processed_target_items = run_target_responses()
+        dataset_dirty = processed_target_items > 0
         print(f"Target VLM processed {processed_target_items} item(s).")
         if target_server.started_by_script:
             target_server.stop()
@@ -381,8 +401,10 @@ def main() -> None:
             raise SystemExit("Stopped before certification because human labels were not confirmed.")
 
         human_gold_records = apply_human_label_sheet(human_label_sheet_path, human_gold_records)
+        dataset_dirty = True
         records_by_key = {record_key(record): record for record in human_gold_records}
         apply_checker_results(records_by_key, gold_checker_rows)
+        dataset_dirty = True
         human_gold_records = merge_checker_rows(human_gold_records, gold_checker_rows)
 
         reliability_rows = [estimate_reliability(human_gold_records, target) for target in TARGETS]
@@ -403,6 +425,7 @@ def main() -> None:
                 monte_carlo_rows=[],
                 certificate_rows=[],
             )
+            dataset_archived = True
             raise SystemExit(1)
 
         gold_keys = {record_key(record) for record in human_gold_records}
@@ -410,6 +433,7 @@ def main() -> None:
         evaluation_checker_rows = judge_records(evaluation_records, annotation_guide, stage="evaluation")
         evaluation_by_key = {record_key(record): record for record in evaluation_records}
         apply_checker_results(evaluation_by_key, evaluation_checker_rows)
+        dataset_dirty = True
         evaluation_records = merge_checker_rows(evaluation_records, evaluation_checker_rows)
 
         monte_carlo_rows = run_monte_carlo(
@@ -437,7 +461,12 @@ def main() -> None:
             monte_carlo_rows=monte_carlo_rows,
             certificate_rows=certificate_rows,
         )
+        dataset_archived = True
         print(f"\nRun complete. Artifacts saved under {run_dir}")
+    except BaseException as exc:
+        if dataset_dirty and not dataset_archived:
+            emergency_snapshot_and_reset(run_dir, exc)
+        raise
     finally:
         if checker_server.started_by_script:
             checker_server.stop()

@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What is the total price shown on this receipt? If the image quality is degraded but the required receipt evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible receipt text and the CORD total.total_price field. Source question: What is the total price shown on this receipt?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: 72,600. State uncertainty only when the required receipt evidence is not readable.",
+      "expected_answer_or_behavior": "72,600",
       "source_index": 4,
       "hf_id": "naver-clova-ix/cord-v2:train:4",
       "image_path": "dataset/receipts/images/receipts_0004.jpg",

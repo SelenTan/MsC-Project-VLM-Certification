@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What is the post-date of the article? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: What is the post-date of the article?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"The post-date of the article is September 1, 2016.\", \"ui_elements\": [{\"bounds\": [226.0, 605.0, 401.0, 644.0], \"text\": \"Sep 1, 2016\", \"vh_index\": -1}]}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"The post-date of the article is September 1, 2016.\", \"ui_elements\": [{\"bounds\": [226.0, 605.0, 401.0, 644.0], \"text\": \"Sep 1, 2016\", \"vh_index\": -1}]}]",
       "source_index": 7,
       "hf_id": "51120",
       "image_path": "dataset/screenshots/images/screenshots_0006.jpg",

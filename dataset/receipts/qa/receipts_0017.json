@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What price is shown for Pertamax on this receipt? If the image quality is degraded but the required receipt evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible receipt text and the CORD menu.price field. Source question: What price is shown for Pertamax on this receipt?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: Rp. 217,685. State uncertainty only when the required receipt evidence is not readable.",
+      "expected_answer_or_behavior": "Rp. 217,685",
       "source_index": 17,
       "hf_id": "naver-clova-ix/cord-v2:train:17",
       "image_path": "dataset/receipts/images/receipts_0017.jpg",

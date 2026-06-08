@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "In the figure with peaks (that seem like frequency peaks). There is a row with a clearly visible last peak. What is the word in the figure caption that is directly below that peak (the closest one to it)? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible document text, tables, figures, or OCR content needed for the selected DocVQA answer. Source question: In the figure with peaks (that seem like frequency peaks). There is a row with a clearly visible last peak. What is the word in the figure caption that is directly below that peak (the closest one to it)?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: making. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "making",
       "source_index": 14,
       "hf_id": "science_paper_2",
       "image_path": "dataset/documents/images/documents_0014.jpg",

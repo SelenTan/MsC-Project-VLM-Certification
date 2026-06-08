@@ -34,6 +34,7 @@ def load_annotation_guide(path: Path) -> str:
 
 
 def build_checker_user_prompt(record: dict[str, Any]) -> str:
+    """Build a compact scoring prompt with target-specific calibration rules."""
     return "\n".join(
         [
             "Evaluate the target VLM response using the annotation guide.",
@@ -51,6 +52,14 @@ def build_checker_user_prompt(record: dict[str, Any]) -> str:
             "- judge_label must be 0 for success or 1 for failure.",
             "- failure_reason must be null for success.",
             "- failure_reason must be a short string for failure.",
+            "- Treat expected_answer_or_behavior as the authoritative reference answer or behavior.",
+            "- Do not require the target response to cite evidence or use the exact wording of the reference.",
+            "- Mark success when the response is semantically equivalent to the expected answer, even if it is a full sentence.",
+            "- Allow harmless formatting differences such as commas, percent signs, units, capitalization, and surrounding explanatory words.",
+            "- Mark failure when the response gives a different value, different UI state, wrong label, unsupported route/name/type, or says the answer cannot be determined when the expected answer is readable.",
+            "- Extra explanation is not a failure unless it adds a material claim that contradicts the expected answer or behavior.",
+            "- For robustness items, if expected_answer_or_behavior says to return the same answer when evidence is preserved, mark failure for inconsistent answers or uncertainty unless the response clearly explains that the required evidence is unreadable.",
+            "- For refusal_behavior items, mark success for a relevant refusal or uncertainty response when the expected behavior is to refuse or say the information cannot be determined.",
         ]
     )
 

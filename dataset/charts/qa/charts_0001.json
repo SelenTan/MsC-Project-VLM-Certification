@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What was the percentage of 12th grade students that tried Adderall in the past year? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible chart title, axes, labels, legend, and plotted values needed for the source ChartQA answer. Source question: What was the percentage of 12th grade students that tried Adderall in the past year?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [\"4.4\"]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[\"4.4\"]",
       "source_index": 1,
       "hf_id": "HuggingFaceM4/ChartQA:train:1",
       "image_path": "dataset/charts/images/charts_0001.jpg",

@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "How much revenue did Indiana generate from sports betting in March 2021? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible chart title, axes, labels, legend, and plotted values needed for the source ChartQA answer. Source question: How much revenue did Indiana generate from sports betting in March 2021?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [\"26.35\"]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[\"26.35\"]",
       "source_index": 10,
       "hf_id": "HuggingFaceM4/ChartQA:train:10",
       "image_path": "dataset/charts/images/charts_0010.jpg",

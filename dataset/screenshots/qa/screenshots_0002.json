@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What time does the sun rise? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: What time does the sun rise?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"The sun rises at 7:21 a.m.\", \"ui_elements\": [{\"bounds\": [84.0, 263.0, 149.0, 287.0], \"text\": \"7:21 AM\", \"vh_index\": 35}]}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"The sun rises at 7:21 a.m.\", \"ui_elements\": [{\"bounds\": [84.0, 263.0, 149.0, 287.0], \"text\": \"7:21 AM\", \"vh_index\": 35}]}]",
       "source_index": 2,
       "hf_id": "51082",
       "image_path": "dataset/screenshots/images/screenshots_0002.jpg",

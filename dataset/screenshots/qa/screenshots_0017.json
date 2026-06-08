@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What is the number of followers that Harsh Pal has? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: What is the number of followers that Harsh Pal has?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"The number of followers is 638.\", \"ui_elements\": [{\"bounds\": [145.0, 683.0, 202.0, 717.0], \"text\": \"638\", \"vh_index\": -1}]}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"The number of followers is 638.\", \"ui_elements\": [{\"bounds\": [145.0, 683.0, 202.0, 717.0], \"text\": \"638\", \"vh_index\": -1}]}]",
       "source_index": 18,
       "hf_id": "51283",
       "image_path": "dataset/screenshots/images/screenshots_0017.jpg",

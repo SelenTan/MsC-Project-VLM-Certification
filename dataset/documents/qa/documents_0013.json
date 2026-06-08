@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "In Fiscal 2025, by how many dollars does NVIDIA’s TSR value exceed the Nasdaq-100 Index TSR value? Do not provide units. If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible document text, tables, figures, or OCR content needed for the selected DocVQA answer. Source question: In Fiscal 2025, by how many dollars does NVIDIA’s TSR value exceed the Nasdaq-100 Index TSR value? Do not provide units.",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: 2048.88. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "2048.88",
       "source_index": 13,
       "hf_id": "business_report_1",
       "image_path": "dataset/documents/images/documents_0013.jpg",

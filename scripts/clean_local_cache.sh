@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 echo "Before:"
 du -sh /tmp/uceeht3/* 2>/dev/null
 

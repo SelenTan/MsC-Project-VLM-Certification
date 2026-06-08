@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What are the features of AudioField? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: What are the features of AudioField?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"The features of AudioField are \\\"Powerful audio recording application with editing capabilities\\\".\", \"ui_elements\": [{\"bounds\": [109.0, 121.0, 520.0, 165.0], \"text\": \"Powerful audio recording application with editing capabilities.\", \"vh_index\": 13}]}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"The features of AudioField are \\\"Powerful audio recording application with editing capabilities\\\".\", \"ui_elements\": [{\"bounds\": [109.0, 121.0, 520.0, 165.0], \"text\": \"Powerful audio recording application with editing capabilities.\", \"vh_index\": 13}]}]",
       "source_index": 8,
       "hf_id": "50598",
       "image_path": "dataset/screenshots/images/screenshots_0007.jpg",

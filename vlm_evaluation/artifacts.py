@@ -273,6 +273,14 @@ def copy_dataset_snapshot(project_root: Path, dataset_dir: str, run_dir: Path) -
     shutil.copytree(source, destination)
 
 
+def copy_named_dataset_snapshot(project_root: Path, dataset_dir: str, run_dir: Path, name: str) -> None:
+    source = project_path(project_root, dataset_dir)
+    destination = run_dir / name
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(source, destination)
+
+
 def add_run_metadata(rows: list[dict[str, Any]], run_name: str, target_model: str, checker_model: str) -> list[dict[str, Any]]:
     enriched: list[dict[str, Any]] = []
     for row in rows:
@@ -307,16 +315,18 @@ def make_charts(run_dir: Path, reliability_rows: list[dict[str, Any]], certifica
     plt.close()
 
     alpha_values = [row["alpha_median"] if row["alpha_median"] is not None else 0 for row in certificate_rows]
-    plt.figure(figsize=(8, 4))
-    plt.bar([row["target"] for row in certificate_rows], alpha_values)
-    plt.ylim(0, 1)
-    plt.ylabel("Median certifiable alpha")
-    plt.title("Certificate Alpha by Target")
-    plt.xticks(rotation=20, ha="right")
-    plt.tight_layout()
-    plt.savefig(charts_dir / "certifiable_alpha_by_target.png", dpi=160)
-    plt.close()
+    if certificate_rows:
+        plt.figure(figsize=(8, 4))
+        plt.bar([row["target"] for row in certificate_rows], alpha_values)
+        plt.ylim(0, 1)
+        plt.ylabel("Median certifiable alpha")
+        plt.title("Certificate Alpha by Target")
+        plt.xticks(rotation=20, ha="right")
+        plt.tight_layout()
+        plt.savefig(charts_dir / "certifiable_alpha_by_target.png", dpi=160)
+        plt.close()
 
+    histogram_written = False
     plt.figure(figsize=(8, 4))
     for target in targets:
         alphas = [
@@ -326,12 +336,14 @@ def make_charts(run_dir: Path, reliability_rows: list[dict[str, Any]], certifica
         ]
         if alphas:
             plt.hist(alphas, bins=20, alpha=0.45, label=target)
-    plt.xlabel("Certifiable alpha")
-    plt.ylabel("Repeat count")
-    plt.title("Monte Carlo Certifiable Alpha Distribution")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(charts_dir / "monte_carlo_alpha_distribution.png", dpi=160)
+            histogram_written = True
+    if histogram_written:
+        plt.xlabel("Certifiable alpha")
+        plt.ylabel("Repeat count")
+        plt.title("Monte Carlo Certifiable Alpha Distribution")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(charts_dir / "monte_carlo_alpha_distribution.png", dpi=160)
     plt.close()
 
 

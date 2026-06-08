@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What was Ikea's impression score? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible chart title, axes, labels, legend, and plotted values needed for the source ChartQA answer. Source question: What was Ikea's impression score?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [\"57\"]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[\"57\"]",
       "source_index": 2,
       "hf_id": "HuggingFaceM4/ChartQA:train:2",
       "image_path": "dataset/charts/images/charts_0002.jpg",

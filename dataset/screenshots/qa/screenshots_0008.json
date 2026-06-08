@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "What is the email address? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: What is the email address?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"The email address is appcrawler1@gmail.com.\", \"ui_elements\": [{\"bounds\": [15.0, 158.0, 230.0, 189.0], \"text\": \"appcrawler1@gmail.com\", \"vh_index\": -1}]}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"The email address is appcrawler1@gmail.com.\", \"ui_elements\": [{\"bounds\": [15.0, 158.0, 230.0, 189.0], \"text\": \"appcrawler1@gmail.com\", \"vh_index\": -1}]}]",
       "source_index": 9,
       "hf_id": "50499",
       "image_path": "dataset/screenshots/images/screenshots_0008.jpg",

@@ -38,7 +38,7 @@
       "target": "robustness",
       "prompt": "How many characters are required to create a password? If the image quality is degraded but the evidence remains visible, answer consistently; if the evidence is no longer readable, say that it cannot be determined.",
       "expected_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: How many characters are required to create a password?",
-      "expected_answer_or_behavior": "Return the same answer as the visual factuality item when evidence is preserved: [{\"full_answer\": \"<no answer>\", \"ui_elements\": []}]. State uncertainty only when the required evidence is not readable.",
+      "expected_answer_or_behavior": "[{\"full_answer\": \"<no answer>\", \"ui_elements\": []}]",
       "source_index": 17,
       "hf_id": "50512",
       "image_path": "dataset/screenshots/images/screenshots_0016.jpg",
