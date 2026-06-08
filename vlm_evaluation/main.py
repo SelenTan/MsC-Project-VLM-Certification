@@ -5,7 +5,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "vlm_testing"))
 
 from ai_checker import call_checker, load_annotation_guide, require_local_endpoint
 from artifacts import (
@@ -25,17 +29,38 @@ from artifacts import (
 from certification import estimate_reliability, run_monte_carlo, summarize_certificates
 from model_server import ManagedServer, auto_select_gpus, start_vllm_server
 from reset_dataset import reset_dataset_fields
+from run_target_vlm import run_dataset as run_target_vlm_dataset
 
 
 # Paths
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATASET_DIR = "dataset"
 RUNS_DIR = "runs"
 ANNOTATION_GUIDE_PATH = "ANNOTATION_GUIDE.md"
 RUN_NAME = None
 
-# Models and automatic local checker deployment
+# Target VLM response generation
+RUN_TARGET_VLM_FIRST = True
+TARGET_MODEL_ID = "Qwen/Qwen2.5-VL-72B-Instruct"
 TARGET_MODEL_NAME = "Qwen2.5-VL-72B-Instruct"
+TARGET_PORT = 8000
+TARGET_CATEGORIES = None
+TARGET_LIMIT = None
+TARGET_MAX_TOKENS = 160
+TARGET_TEMPERATURE = 0.0
+TARGET_TIMEOUT_SECONDS = 180
+TARGET_OVERWRITE_RESPONSES = False
+TARGET_CUDA_VISIBLE_DEVICES = None
+TARGET_NUM_GPUS = 4
+TARGET_MIN_FREE_MEMORY_MB = 60000
+TARGET_TENSOR_PARALLEL_SIZE = None
+TARGET_MAX_MODEL_LEN = 65536
+TARGET_GPU_MEMORY_UTILIZATION = 0.90
+TARGET_LIMIT_MM_PER_PROMPT = '{"image":2,"video":0}'
+TARGET_MM_ENCODER_TP_MODE = "data"
+TARGET_VLLM_EXTRA_ARGS: tuple[str, ...] = ()
+TARGET_SERVER_WAIT_TIMEOUT_SECONDS = 3600
+
+# Automatic local checker deployment
 CHECKER_MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
 CHECKER_PORT = 8001
 CHECKER_INTERNAL_ENDPOINT = f"http://localhost:{CHECKER_PORT}/v1/chat/completions"
@@ -87,7 +112,26 @@ def current_config(run_name: str) -> dict[str, Any]:
         "dataset_dir": DATASET_DIR,
         "runs_dir": RUNS_DIR,
         "annotation_guide_path": ANNOTATION_GUIDE_PATH,
+        "run_target_vlm_first": RUN_TARGET_VLM_FIRST,
+        "target_model_id": TARGET_MODEL_ID,
         "target_model_name": TARGET_MODEL_NAME,
+        "target_port": TARGET_PORT,
+        "target_categories": TARGET_CATEGORIES,
+        "target_limit": TARGET_LIMIT,
+        "target_max_tokens": TARGET_MAX_TOKENS,
+        "target_temperature": TARGET_TEMPERATURE,
+        "target_timeout_seconds": TARGET_TIMEOUT_SECONDS,
+        "target_overwrite_responses": TARGET_OVERWRITE_RESPONSES,
+        "target_cuda_visible_devices": TARGET_CUDA_VISIBLE_DEVICES,
+        "target_num_gpus": TARGET_NUM_GPUS,
+        "target_min_free_memory_mb": TARGET_MIN_FREE_MEMORY_MB,
+        "target_tensor_parallel_size": TARGET_TENSOR_PARALLEL_SIZE,
+        "target_max_model_len": TARGET_MAX_MODEL_LEN,
+        "target_gpu_memory_utilization": TARGET_GPU_MEMORY_UTILIZATION,
+        "target_limit_mm_per_prompt": TARGET_LIMIT_MM_PER_PROMPT,
+        "target_mm_encoder_tp_mode": TARGET_MM_ENCODER_TP_MODE,
+        "target_vllm_extra_args": TARGET_VLLM_EXTRA_ARGS,
+        "target_server_wait_timeout_seconds": TARGET_SERVER_WAIT_TIMEOUT_SECONDS,
         "checker_model_name": CHECKER_MODEL_NAME,
         "checker_port": CHECKER_PORT,
         "checker_internal_endpoint": CHECKER_INTERNAL_ENDPOINT,
@@ -121,6 +165,65 @@ def current_config(run_name: str) -> dict[str, Any]:
         "overwrite_judge_labels": OVERWRITE_JUDGE_LABELS,
         "reset_dataset_after_archive": RESET_DATASET_AFTER_ARCHIVE,
     }
+
+
+def target_internal_endpoint() -> str:
+    return f"http://localhost:{TARGET_PORT}/v1/chat/completions"
+
+
+def maybe_start_target_server(run_dir: Path) -> ManagedServer:
+    if not RUN_TARGET_VLM_FIRST or not target_responses_needed():
+        return ManagedServer(process=None, log_path=None)
+    cuda_visible_devices = TARGET_CUDA_VISIBLE_DEVICES
+    if cuda_visible_devices is None:
+        cuda_visible_devices = auto_select_gpus(TARGET_NUM_GPUS, TARGET_MIN_FREE_MEMORY_MB)
+    tensor_parallel_size = TARGET_TENSOR_PARALLEL_SIZE or len(cuda_visible_devices.split(","))
+    print("Starting local target VLM server if needed...")
+    print(f"Using CUDA_VISIBLE_DEVICES={cuda_visible_devices}, tensor_parallel_size={tensor_parallel_size}")
+    return start_vllm_server(
+        endpoint=target_internal_endpoint(),
+        model=TARGET_MODEL_ID,
+        served_model_name=TARGET_MODEL_ID,
+        log_path=run_dir / "logs" / "target_vlm.log",
+        cuda_visible_devices=cuda_visible_devices,
+        tensor_parallel_size=tensor_parallel_size,
+        max_model_len=TARGET_MAX_MODEL_LEN,
+        gpu_memory_utilization=TARGET_GPU_MEMORY_UTILIZATION,
+        limit_mm_per_prompt=TARGET_LIMIT_MM_PER_PROMPT,
+        mm_encoder_tp_mode=TARGET_MM_ENCODER_TP_MODE,
+        extra_args=TARGET_VLLM_EXTRA_ARGS,
+        wait_timeout_seconds=TARGET_SERVER_WAIT_TIMEOUT_SECONDS,
+    )
+
+
+def run_target_responses() -> int:
+    """Generate target_model_response values before checker validation and certification."""
+    if not RUN_TARGET_VLM_FIRST:
+        return 0
+    args = SimpleNamespace(
+        dataset_dir=DATASET_DIR,
+        port=TARGET_PORT,
+        model=TARGET_MODEL_ID,
+        api_key_env="LOCAL_VLM_API_KEY",
+        categories=TARGET_CATEGORIES,
+        targets=TARGETS,
+        limit=TARGET_LIMIT,
+        max_tokens=TARGET_MAX_TOKENS,
+        temperature=TARGET_TEMPERATURE,
+        timeout=TARGET_TIMEOUT_SECONDS,
+        overwrite=TARGET_OVERWRITE_RESPONSES,
+        dry_run=False,
+    )
+    return run_target_vlm_dataset(args)
+
+
+def target_responses_needed() -> bool:
+    if not RUN_TARGET_VLM_FIRST:
+        return False
+    if TARGET_OVERWRITE_RESPONSES:
+        return True
+    records = load_records(PROJECT_ROOT, DATASET_DIR, TARGETS)
+    return any(not record.get("target_model_response") for record in records)
 
 
 def maybe_start_checker_server(run_dir: Path) -> ManagedServer:
@@ -235,8 +338,15 @@ def main() -> None:
     write_json(run_dir / "run_config.json", config)
 
     require_local_endpoint(CHECKER_INTERNAL_ENDPOINT, ALLOW_NON_LOCAL_CHECKER)
-    checker_server = maybe_start_checker_server(run_dir)
+    target_server = maybe_start_target_server(run_dir)
+    checker_server = ManagedServer(process=None, log_path=None)
     try:
+        processed_target_items = run_target_responses()
+        print(f"Target VLM processed {processed_target_items} item(s).")
+        if target_server.started_by_script:
+            target_server.stop()
+            target_server = ManagedServer(process=None, log_path=None)
+        checker_server = maybe_start_checker_server(run_dir)
         annotation_guide = load_annotation_guide(PROJECT_ROOT / ANNOTATION_GUIDE_PATH)
 
         records = load_records(PROJECT_ROOT, DATASET_DIR, TARGETS)
@@ -319,6 +429,8 @@ def main() -> None:
     finally:
         if checker_server.started_by_script:
             checker_server.stop()
+        if target_server.started_by_script:
+            target_server.stop()
 
 
 if __name__ == "__main__":
