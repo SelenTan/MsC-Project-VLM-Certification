@@ -1,0 +1,5 @@
+datasets>=2.19.0
+huggingface_hub>=0.23.0
+Pillow>=10.0.0
+tqdm>=4.66.0
+urllib3<2
