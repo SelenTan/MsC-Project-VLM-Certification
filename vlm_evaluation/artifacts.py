@@ -31,9 +31,12 @@ def default_run_name(target_model_name: str) -> str:
 
 
 def create_run_dir(project_root: Path, runs_dir: str, run_name: str) -> Path:
-    run_dir = project_path(project_root, runs_dir) / run_name
-    if run_dir.exists():
-        raise FileExistsError(f"Run directory already exists: {run_dir}")
+    runs_path = project_path(project_root, runs_dir)
+    run_dir = runs_path / run_name
+    suffix = 2
+    while run_dir.exists():
+        run_dir = runs_path / f"{run_name}_{suffix}"
+        suffix += 1
     run_dir.mkdir(parents=True)
     return run_dir
 

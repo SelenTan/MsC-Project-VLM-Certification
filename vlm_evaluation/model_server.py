@@ -102,12 +102,23 @@ def wait_for_endpoint(endpoint: str, process: subprocess.Popen[bytes], timeout_s
     while time.time() < deadline:
         if process.poll() is not None:
             raise ModelServerError(
-                f"vLLM server exited before becoming ready. Check log: {log_path}"
+                f"vLLM server exited before becoming ready. Check log: {log_path}\n\n"
+                f"Last log lines:\n{tail_log(log_path)}"
             )
         if endpoint_available(endpoint, timeout=5):
             return
         time.sleep(5)
-    raise ModelServerError(f"Timed out waiting for vLLM server. Check log: {log_path}")
+    raise ModelServerError(
+        f"Timed out waiting for vLLM server. Check log: {log_path}\n\n"
+        f"Last log lines:\n{tail_log(log_path)}"
+    )
+
+
+def tail_log(path: Path, max_lines: int = 80) -> str:
+    if not path.exists():
+        return "<log file does not exist>"
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return "\n".join(lines[-max_lines:]) or "<log file is empty>"
 
 
 def start_vllm_server(

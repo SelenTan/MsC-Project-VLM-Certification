@@ -8,7 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
 sys.path.insert(0, str(PROJECT_ROOT / "vlm_testing"))
 
 from ai_checker import call_checker, load_annotation_guide, require_local_endpoint
@@ -53,7 +54,7 @@ TARGET_CUDA_VISIBLE_DEVICES = None
 TARGET_NUM_GPUS = 4
 TARGET_MIN_FREE_MEMORY_MB = 60000
 TARGET_TENSOR_PARALLEL_SIZE = None
-TARGET_MAX_MODEL_LEN = 65536
+TARGET_MAX_MODEL_LEN = 8192
 TARGET_GPU_MEMORY_UTILIZATION = 0.90
 TARGET_LIMIT_MM_PER_PROMPT = '{"image":2,"video":0}'
 TARGET_MM_ENCODER_TP_MODE = "data"
@@ -71,7 +72,7 @@ CHECKER_CUDA_VISIBLE_DEVICES = None
 CHECKER_NUM_GPUS = 1
 CHECKER_MIN_FREE_MEMORY_MB = 20000
 CHECKER_TENSOR_PARALLEL_SIZE = 1
-CHECKER_MAX_MODEL_LEN = 32768
+CHECKER_MAX_MODEL_LEN = 8192
 CHECKER_GPU_MEMORY_UTILIZATION = 0.90
 CHECKER_LIMIT_MM_PER_PROMPT = None
 CHECKER_MM_ENCODER_TP_MODE = None
@@ -334,6 +335,7 @@ def main() -> None:
     """Run checker validation, pause for human labels, calculate certification, archive, and reset."""
     run_name = RUN_NAME or default_run_name(TARGET_MODEL_NAME)
     run_dir = create_run_dir(PROJECT_ROOT, RUNS_DIR, run_name)
+    run_name = run_dir.name
     config = current_config(run_name)
     write_json(run_dir / "run_config.json", config)
 
