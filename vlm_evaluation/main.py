@@ -23,7 +23,7 @@ from artifacts import (
     write_json,
 )
 from certification import estimate_reliability, run_monte_carlo, summarize_certificates
-from model_server import ManagedServer, start_vllm_server
+from model_server import ManagedServer, auto_select_gpus, start_vllm_server
 from reset_dataset import reset_dataset_fields
 
 
@@ -42,7 +42,9 @@ CHECKER_INTERNAL_ENDPOINT = f"http://localhost:{CHECKER_PORT}/v1/chat/completion
 CHECKER_API_KEY_ENV = "LOCAL_CHECKER_API_KEY"
 ALLOW_NON_LOCAL_CHECKER = False
 AUTO_DEPLOY_CHECKER = True
-CHECKER_CUDA_VISIBLE_DEVICES = "0"
+CHECKER_CUDA_VISIBLE_DEVICES = None
+CHECKER_NUM_GPUS = 1
+CHECKER_MIN_FREE_MEMORY_MB = 20000
 CHECKER_TENSOR_PARALLEL_SIZE = 1
 CHECKER_MAX_MODEL_LEN = 32768
 CHECKER_GPU_MEMORY_UTILIZATION = 0.90
@@ -93,6 +95,8 @@ def current_config(run_name: str) -> dict[str, Any]:
         "allow_non_local_checker": ALLOW_NON_LOCAL_CHECKER,
         "auto_deploy_checker": AUTO_DEPLOY_CHECKER,
         "checker_cuda_visible_devices": CHECKER_CUDA_VISIBLE_DEVICES,
+        "checker_num_gpus": CHECKER_NUM_GPUS,
+        "checker_min_free_memory_mb": CHECKER_MIN_FREE_MEMORY_MB,
         "checker_tensor_parallel_size": CHECKER_TENSOR_PARALLEL_SIZE,
         "checker_max_model_len": CHECKER_MAX_MODEL_LEN,
         "checker_gpu_memory_utilization": CHECKER_GPU_MEMORY_UTILIZATION,
@@ -122,13 +126,17 @@ def current_config(run_name: str) -> dict[str, Any]:
 def maybe_start_checker_server(run_dir: Path) -> ManagedServer:
     if not AUTO_DEPLOY_CHECKER:
         return ManagedServer(process=None, log_path=None)
+    cuda_visible_devices = CHECKER_CUDA_VISIBLE_DEVICES
+    if cuda_visible_devices is None:
+        cuda_visible_devices = auto_select_gpus(CHECKER_NUM_GPUS, CHECKER_MIN_FREE_MEMORY_MB)
     print("Starting local checker server if needed...")
+    print(f"Using CUDA_VISIBLE_DEVICES={cuda_visible_devices}, tensor_parallel_size={CHECKER_TENSOR_PARALLEL_SIZE}")
     return start_vllm_server(
         endpoint=CHECKER_INTERNAL_ENDPOINT,
         model=CHECKER_MODEL_NAME,
         served_model_name=CHECKER_MODEL_NAME,
         log_path=run_dir / "logs" / "checker_vllm.log",
-        cuda_visible_devices=CHECKER_CUDA_VISIBLE_DEVICES,
+        cuda_visible_devices=cuda_visible_devices,
         tensor_parallel_size=CHECKER_TENSOR_PARALLEL_SIZE,
         max_model_len=CHECKER_MAX_MODEL_LEN,
         gpu_memory_utilization=CHECKER_GPU_MEMORY_UTILIZATION,

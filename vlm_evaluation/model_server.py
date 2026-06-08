@@ -39,6 +39,39 @@ class ManagedServer:
             self.process.wait(timeout=30)
 
 
+def auto_select_gpus(required_count: int, min_free_memory_mb: int) -> str:
+    """Select the GPUs with the most free memory using nvidia-smi, or fail if not enough are available."""
+    command = [
+        "nvidia-smi",
+        "--query-gpu=index,memory.free",
+        "--format=csv,noheader,nounits",
+    ]
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise ModelServerError("Could not run nvidia-smi for GPU auto-selection.") from exc
+
+    candidates: list[tuple[int, int]] = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        index_text, free_memory_text = [part.strip() for part in line.split(",", maxsplit=1)]
+        index = int(index_text)
+        free_memory_mb = int(free_memory_text)
+        if free_memory_mb >= min_free_memory_mb:
+            candidates.append((index, free_memory_mb))
+
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    if len(candidates) < required_count:
+        available = ", ".join(f"gpu{index}:{free_memory}MB" for index, free_memory in candidates) or "none"
+        raise ModelServerError(
+            f"Need {required_count} GPU(s) with at least {min_free_memory_mb}MB free each, "
+            f"but only found: {available}"
+        )
+    selected = sorted(index for index, _ in candidates[:required_count])
+    return ",".join(str(index) for index in selected)
+
+
 def endpoint_base(endpoint: str) -> str:
     if endpoint.endswith("/chat/completions"):
         return endpoint[: -len("/chat/completions")]

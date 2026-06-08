@@ -16,7 +16,7 @@ from urllib import error, request
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
-from model_server import ManagedServer, start_vllm_server  # noqa: E402
+from model_server import ManagedServer, auto_select_gpus, start_vllm_server  # noqa: E402
 
 TARGET_ORDER = ("visual_factuality", "robustness", "refusal_behavior")
 DEFAULT_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct"
@@ -69,8 +69,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Print planned items without calling the model.")
     parser.add_argument("--auto-deploy", action="store_true", default=True, help="Start a local vLLM server if needed.")
     parser.add_argument("--no-auto-deploy", action="store_false", dest="auto_deploy", help="Do not start vLLM automatically.")
-    parser.add_argument("--cuda-visible-devices", default="0,1,2,3", help="CUDA devices for target VLM serving.")
-    parser.add_argument("--tensor-parallel-size", type=int, default=4, help="vLLM tensor parallel size.")
+    parser.add_argument("--cuda-visible-devices", default=None, help="Manual CUDA devices, such as 0,2,3.")
+    parser.add_argument("--num-gpus", type=int, default=4, help="Number of GPUs to auto-select for target VLM serving.")
+    parser.add_argument(
+        "--min-free-memory-mb",
+        type=int,
+        default=60000,
+        help="Minimum free memory per auto-selected GPU.",
+    )
+    parser.add_argument("--tensor-parallel-size", type=int, default=None, help="vLLM tensor parallel size. Defaults to selected GPU count.")
     parser.add_argument("--max-model-len", type=int, default=65536, help="vLLM max model length.")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.90, help="vLLM GPU memory utilization.")
     parser.add_argument("--limit-mm-per-prompt", default='{"image":2,"video":0}', help="vLLM multimodal input limit JSON.")
@@ -234,14 +241,19 @@ def run_dataset(args: argparse.Namespace) -> int:
 def maybe_start_target_server(args: argparse.Namespace) -> ManagedServer:
     if not args.auto_deploy or args.dry_run:
         return ManagedServer(process=None, log_path=None)
+    cuda_visible_devices = args.cuda_visible_devices
+    if cuda_visible_devices is None:
+        cuda_visible_devices = auto_select_gpus(args.num_gpus, args.min_free_memory_mb)
+    tensor_parallel_size = args.tensor_parallel_size or len(cuda_visible_devices.split(","))
     print("Starting local target VLM server if needed...")
+    print(f"Using CUDA_VISIBLE_DEVICES={cuda_visible_devices}, tensor_parallel_size={tensor_parallel_size}")
     return start_vllm_server(
         endpoint=internal_endpoint(args.port),
         model=args.model,
         served_model_name=args.model,
         log_path=PROJECT_ROOT / "logs" / "target_vlm_vllm.log",
-        cuda_visible_devices=args.cuda_visible_devices,
-        tensor_parallel_size=args.tensor_parallel_size,
+        cuda_visible_devices=cuda_visible_devices,
+        tensor_parallel_size=tensor_parallel_size,
         max_model_len=args.max_model_len,
         gpu_memory_utilization=args.gpu_memory_utilization,
         limit_mm_per_prompt=args.limit_mm_per_prompt,
