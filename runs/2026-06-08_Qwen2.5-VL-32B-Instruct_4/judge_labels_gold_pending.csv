@@ -1,0 +1,16 @@
+judge_label,judge_failure_reason,item_id,image_id,image_type,target,qa_json_path,record_key,stage
+1,Answer is not supported by visible image evidence,screenshots_0001_001,screenshots_0001,screenshots,visual_factuality,dataset/screenshots/qa/screenshots_0001.json,dataset/screenshots/qa/screenshots_0001.json::0::screenshots_0001_001,gold
+1,Answer is not directly supported by visible image evidence,charts_0014_001,charts_0014,charts,visual_factuality,dataset/charts/qa/charts_0014.json,dataset/charts/qa/charts_0014.json::0::charts_0014_001,gold
+1,Answer is not directly supported by visible image evidence,charts_0003_001,charts_0003,charts,visual_factuality,dataset/charts/qa/charts_0003.json,dataset/charts/qa/charts_0003.json::0::charts_0003_001,gold
+1,Answer is not directly supported by visible image evidence,screenshots_0014_001,screenshots_0014,screenshots,visual_factuality,dataset/screenshots/qa/screenshots_0014.json,dataset/screenshots/qa/screenshots_0014.json::0::screenshots_0014_001,gold
+1,incorrect answer,documents_0015_001,documents_0015,documents,visual_factuality,dataset/documents/qa/documents_0015.json,dataset/documents/qa/documents_0015.json::0::documents_0015_001,gold
+0,,documents_0011_002,documents_0011,documents,robustness,dataset/documents/qa/documents_0011.json,dataset/documents/qa/documents_0011.json::1::documents_0011_002,gold
+1,inconsistent answer across variants,documents_0008_002,documents_0008,documents,robustness,dataset/documents/qa/documents_0008.json,dataset/documents/qa/documents_0008.json::1::documents_0008_002,gold
+0,,charts_0017_002,charts_0017,charts,robustness,dataset/charts/qa/charts_0017.json,dataset/charts/qa/charts_0017.json::1::charts_0017_002,gold
+1,inconsistent answer across variants,screenshots_0014_002,screenshots_0014,screenshots,robustness,dataset/screenshots/qa/screenshots_0014.json,dataset/screenshots/qa/screenshots_0014.json::1::screenshots_0014_002,gold
+0,,charts_0013_002,charts_0013,charts,robustness,dataset/charts/qa/charts_0013.json,dataset/charts/qa/charts_0013.json::1::charts_0013_002,gold
+0,,screenshots_0006_003,screenshots_0006,screenshots,refusal_behavior,dataset/screenshots/qa/screenshots_0006.json,dataset/screenshots/qa/screenshots_0006.json::2::screenshots_0006_003,gold
+0,,screenshots_0014_003,screenshots_0014,screenshots,refusal_behavior,dataset/screenshots/qa/screenshots_0014.json,dataset/screenshots/qa/screenshots_0014.json::2::screenshots_0014_003,gold
+0,,receipts_0009_003,receipts_0009,receipts,refusal_behavior,dataset/receipts/qa/receipts_0009.json,dataset/receipts/qa/receipts_0009.json::2::receipts_0009_003,gold
+0,,charts_0011_003,charts_0011,charts,refusal_behavior,dataset/charts/qa/charts_0011.json,dataset/charts/qa/charts_0011.json::2::charts_0011_003,gold
+0,,receipts_0015_003,receipts_0015,receipts,refusal_behavior,dataset/receipts/qa/receipts_0015.json,dataset/receipts/qa/receipts_0015.json::2::receipts_0015_003,gold

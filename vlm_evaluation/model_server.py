@@ -41,6 +41,43 @@ class ManagedServer:
 
 def auto_select_gpus(required_count: int, min_free_memory_mb: int) -> str:
     """Select the GPUs with the most free memory using nvidia-smi, or fail if not enough are available."""
+    candidates = query_free_gpus(min_free_memory_mb)
+    if len(candidates) < required_count:
+        available = ", ".join(f"gpu{index}:{free_memory}MB" for index, free_memory in candidates) or "none"
+        raise ModelServerError(
+            f"Need {required_count} GPU(s) with at least {min_free_memory_mb}MB free each, "
+            f"but only found: {available}"
+        )
+    selected = sorted(index for index, _ in candidates[:required_count])
+    return ",".join(str(index) for index in selected)
+
+
+def auto_select_gpus_by_balanced_memory(
+    max_gpu_count: int,
+    required_balanced_memory_mb: int,
+    min_free_memory_mb: int,
+) -> str:
+    """Select the smallest GPU set whose TP-balanced usable memory meets the target requirement."""
+    candidates = query_free_gpus(min_free_memory_mb)
+    for gpu_count in range(1, max_gpu_count + 1):
+        if len(candidates) < gpu_count:
+            break
+        selected_candidates = candidates[:gpu_count]
+        min_selected_memory = min(free_memory for _, free_memory in selected_candidates)
+        balanced_memory = gpu_count * min_selected_memory
+        if balanced_memory >= required_balanced_memory_mb:
+            selected = sorted(index for index, _ in selected_candidates)
+            return ",".join(str(index) for index in selected)
+
+    available = ", ".join(f"gpu{index}:{free_memory}MB" for index, free_memory in candidates) or "none"
+    raise ModelServerError(
+        f"Could not satisfy balanced GPU memory requirement. Need at least "
+        f"{required_balanced_memory_mb}MB balanced usable memory across up to {max_gpu_count} GPU(s), "
+        f"with each selected GPU above {min_free_memory_mb}MB free. Available: {available}"
+    )
+
+
+def query_free_gpus(min_free_memory_mb: int) -> list[tuple[int, int]]:
     command = [
         "nvidia-smi",
         "--query-gpu=index,memory.free",
@@ -62,14 +99,7 @@ def auto_select_gpus(required_count: int, min_free_memory_mb: int) -> str:
             candidates.append((index, free_memory_mb))
 
     candidates.sort(key=lambda item: item[1], reverse=True)
-    if len(candidates) < required_count:
-        available = ", ".join(f"gpu{index}:{free_memory}MB" for index, free_memory in candidates) or "none"
-        raise ModelServerError(
-            f"Need {required_count} GPU(s) with at least {min_free_memory_mb}MB free each, "
-            f"but only found: {available}"
-        )
-    selected = sorted(index for index, _ in candidates[:required_count])
-    return ",".join(str(index) for index in selected)
+    return candidates
 
 
 def endpoint_base(endpoint: str) -> str:

@@ -52,6 +52,13 @@ def load_records(project_root: Path, dataset_dir: str, targets: Iterable[str]) -
         for item_index, item in enumerate(data.get("items", [])):
             if item.get("target") not in selected_targets:
                 continue
+            image_path = item.get("image_path") or data.get("image_path")
+            variant_paths = item.get("variant_image_paths") or []
+            model_input_image_path = (
+                variant_paths[0]
+                if item.get("target") == "robustness" and variant_paths
+                else image_path
+            )
             record = {
                 "qa_json_path": qa_path.relative_to(project_root).as_posix(),
                 "qa_json_abs_path": str(qa_path),
@@ -67,8 +74,9 @@ def load_records(project_root: Path, dataset_dir: str, targets: Iterable[str]) -
                 "expected_answer_or_behavior": item.get("expected_answer_or_behavior"),
                 "source_index": item.get("source_index"),
                 "hf_id": item.get("hf_id"),
-                "image_path": item.get("image_path") or data.get("image_path"),
-                "variant_image_paths": json.dumps(item.get("variant_image_paths") or [], ensure_ascii=False),
+                "image_path": image_path,
+                "model_input_image_path": model_input_image_path,
+                "variant_image_paths": json.dumps(variant_paths, ensure_ascii=False),
                 "target_model_response": item.get("target_model_response"),
                 "human_label": item.get("human_label"),
                 "judge_label": item.get("judge_label"),
@@ -78,6 +86,65 @@ def load_records(project_root: Path, dataset_dir: str, targets: Iterable[str]) -
             records.append(record)
 
     return records
+
+
+def write_human_label_sheet(path: Path, records: list[dict[str, Any]]) -> None:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        rows.append(
+            {
+                "human_label": "",
+                "human_failure_reason": "",
+                "target": record["target"],
+                "model_input_image_path": record["model_input_image_path"],
+                "prompt": record["prompt"],
+                "expected_evidence": record["expected_evidence"],
+                "expected_answer_or_behavior": record["expected_answer_or_behavior"],
+                "target_model_response": record["target_model_response"],
+                "notes": record["notes"],
+                "record_key": record_key(record),
+            }
+        )
+    write_csv(path, rows)
+
+
+def apply_human_label_sheet(path: Path, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise FileNotFoundError(f"Human label sheet not found: {path}")
+
+    records_by_key = {record_key(record): record for record in records}
+    labelled_keys: set[str] = set()
+    missing: list[str] = []
+
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            key = row.get("record_key", "")
+            if key not in records_by_key:
+                continue
+            label_text = (row.get("human_label") or "").strip()
+            if label_text not in {"0", "1"}:
+                missing.append(records_by_key[key]["item_id"])
+                continue
+            human_label = int(label_text)
+            reason = (row.get("human_failure_reason") or "").strip() or None
+            update_item_fields(
+                records_by_key[key],
+                {
+                    "human_label": human_label,
+                    "failure_reason": reason if human_label == 1 else None,
+                },
+            )
+            labelled_keys.add(key)
+
+    for key, record in records_by_key.items():
+        if key not in labelled_keys:
+            missing.append(record["item_id"])
+
+    if missing:
+        raise ValueError(f"Human labels missing or invalid in label sheet for: {', '.join(missing)}")
+
+    return validate_human_labels(records)
 
 
 def record_key(record: dict[str, Any]) -> str:

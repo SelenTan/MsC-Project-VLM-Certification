@@ -15,6 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "vlm_testing"))
 from ai_checker import call_checker, load_annotation_guide, require_local_endpoint
 from artifacts import (
     apply_checker_results,
+    apply_human_label_sheet,
     create_run_dir,
     default_run_name,
     export_run_artifacts,
@@ -22,13 +23,13 @@ from artifacts import (
     merge_checker_rows,
     record_key,
     sample_human_gold_pool,
-    validate_human_labels,
     validate_target_responses,
+    write_human_label_sheet,
     write_csv,
     write_json,
 )
 from certification import estimate_reliability, run_monte_carlo, summarize_certificates
-from model_server import ManagedServer, auto_select_gpus, start_vllm_server
+from model_server import ManagedServer, auto_select_gpus, auto_select_gpus_by_balanced_memory, start_vllm_server
 from reset_dataset import reset_dataset_fields
 from run_target_vlm import run_dataset as run_target_vlm_dataset
 
@@ -41,43 +42,44 @@ RUN_NAME = None
 
 # Target VLM response generation
 RUN_TARGET_VLM_FIRST = True
-TARGET_MODEL_ID = "Qwen/Qwen2.5-VL-72B-Instruct"
-TARGET_MODEL_NAME = "Qwen2.5-VL-72B-Instruct"
-TARGET_PORT = 8000
 TARGET_CATEGORIES = None
-TARGET_LIMIT = None
-TARGET_MAX_TOKENS = 160
-TARGET_TEMPERATURE = 0.0
-TARGET_TIMEOUT_SECONDS = 180
-TARGET_OVERWRITE_RESPONSES = False
 TARGET_CUDA_VISIBLE_DEVICES = None
-TARGET_NUM_GPUS = 4
-TARGET_MIN_FREE_MEMORY_MB = 60000
-TARGET_TENSOR_PARALLEL_SIZE = None
-TARGET_MAX_MODEL_LEN = 8192
 TARGET_GPU_MEMORY_UTILIZATION = 0.90
+TARGET_LIMIT = None
 TARGET_LIMIT_MM_PER_PROMPT = '{"image":2,"video":0}'
+TARGET_MAX_GPUS = 2
+TARGET_MAX_MODEL_LEN = 16384
+TARGET_MAX_TOKENS = 160
+TARGET_MIN_FREE_MEMORY_MB = 40000
 TARGET_MM_ENCODER_TP_MODE = "data"
-TARGET_VLLM_EXTRA_ARGS: tuple[str, ...] = ()
+TARGET_MODEL_ID = "Qwen/Qwen2.5-VL-32B-Instruct"
+TARGET_MODEL_NAME = "Qwen2.5-VL-32B-Instruct"
+TARGET_OVERWRITE_RESPONSES = False
+TARGET_PORT = 8000
+TARGET_REQUIRED_BALANCED_MEMORY_MB = 100000
 TARGET_SERVER_WAIT_TIMEOUT_SECONDS = 3600
+TARGET_TEMPERATURE = 0.0
+TARGET_TENSOR_PARALLEL_SIZE = None
+TARGET_TIMEOUT_SECONDS = 180
+TARGET_VLLM_EXTRA_ARGS: tuple[str, ...] = ()
 
 # Automatic local checker deployment
-CHECKER_MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
-CHECKER_PORT = 8001
-CHECKER_INTERNAL_ENDPOINT = f"http://localhost:{CHECKER_PORT}/v1/chat/completions"
-CHECKER_API_KEY_ENV = "LOCAL_CHECKER_API_KEY"
 ALLOW_NON_LOCAL_CHECKER = False
 AUTO_DEPLOY_CHECKER = True
+CHECKER_API_KEY_ENV = "LOCAL_CHECKER_API_KEY"
 CHECKER_CUDA_VISIBLE_DEVICES = None
-CHECKER_NUM_GPUS = 1
-CHECKER_MIN_FREE_MEMORY_MB = 20000
-CHECKER_TENSOR_PARALLEL_SIZE = 1
-CHECKER_MAX_MODEL_LEN = 8192
 CHECKER_GPU_MEMORY_UTILIZATION = 0.90
 CHECKER_LIMIT_MM_PER_PROMPT = None
+CHECKER_MAX_MODEL_LEN = 8192
+CHECKER_MIN_FREE_MEMORY_MB = 20000
 CHECKER_MM_ENCODER_TP_MODE = None
-CHECKER_VLLM_EXTRA_ARGS: tuple[str, ...] = ()
+CHECKER_MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
+CHECKER_NUM_GPUS = 1
+CHECKER_PORT = 8001
+CHECKER_INTERNAL_ENDPOINT = f"http://localhost:{CHECKER_PORT}/v1/chat/completions"
 CHECKER_SERVER_WAIT_TIMEOUT_SECONDS = 1800
+CHECKER_TENSOR_PARALLEL_SIZE = 1
+CHECKER_VLLM_EXTRA_ARGS: tuple[str, ...] = ()
 
 # Dataset and target selection
 TARGETS = ("visual_factuality", "robustness", "refusal_behavior")
@@ -124,7 +126,8 @@ def current_config(run_name: str) -> dict[str, Any]:
         "target_timeout_seconds": TARGET_TIMEOUT_SECONDS,
         "target_overwrite_responses": TARGET_OVERWRITE_RESPONSES,
         "target_cuda_visible_devices": TARGET_CUDA_VISIBLE_DEVICES,
-        "target_num_gpus": TARGET_NUM_GPUS,
+        "target_max_gpus": TARGET_MAX_GPUS,
+        "target_required_balanced_memory_mb": TARGET_REQUIRED_BALANCED_MEMORY_MB,
         "target_min_free_memory_mb": TARGET_MIN_FREE_MEMORY_MB,
         "target_tensor_parallel_size": TARGET_TENSOR_PARALLEL_SIZE,
         "target_max_model_len": TARGET_MAX_MODEL_LEN,
@@ -177,7 +180,11 @@ def maybe_start_target_server(run_dir: Path) -> ManagedServer:
         return ManagedServer(process=None, log_path=None)
     cuda_visible_devices = TARGET_CUDA_VISIBLE_DEVICES
     if cuda_visible_devices is None:
-        cuda_visible_devices = auto_select_gpus(TARGET_NUM_GPUS, TARGET_MIN_FREE_MEMORY_MB)
+        cuda_visible_devices = auto_select_gpus_by_balanced_memory(
+            max_gpu_count=TARGET_MAX_GPUS,
+            required_balanced_memory_mb=TARGET_REQUIRED_BALANCED_MEMORY_MB,
+            min_free_memory_mb=TARGET_MIN_FREE_MEMORY_MB,
+        )
     tensor_parallel_size = TARGET_TENSOR_PARALLEL_SIZE or len(cuda_visible_devices.split(","))
     print("Starting local target VLM server if needed...")
     print(f"Using CUDA_VISIBLE_DEVICES={cuda_visible_devices}, tensor_parallel_size={tensor_parallel_size}")
@@ -288,14 +295,14 @@ def judge_records(records: list[dict[str, Any]], annotation_guide: str, stage: s
 
 
 def print_human_label_instructions(human_gold_records: list[dict[str, Any]]) -> None:
-    print("\nSelected human gold pool. Fill human_label in these QA JSON items:")
+    print("\nSelected human gold pool. Fill human_label in the generated CSV label sheet.")
     for record in human_gold_records:
         print(
             f"- {record['item_id']} | {record['target']} | "
-            f"{PROJECT_ROOT / record['qa_json_path']}"
+            f"{record['model_input_image_path']} | {PROJECT_ROOT / record['qa_json_path']}"
         )
     print("\nUse human_label = 0 for success and human_label = 1 for failure.")
-    print("For failures, fill failure_reason if possible. Do not edit judge_label.")
+    print("For failures, fill human_failure_reason if possible.")
 
 
 def archive_and_maybe_reset(
@@ -365,12 +372,15 @@ def main() -> None:
         gold_checker_rows = judge_records(human_gold_records, annotation_guide, stage="gold")
         write_csv(run_dir / "judge_labels_gold_pending.csv", gold_checker_rows)
 
+        human_label_sheet_path = run_dir / "human_label_tasks.csv"
+        write_human_label_sheet(human_label_sheet_path, human_gold_records)
         print_human_label_instructions(human_gold_records)
-        answer = input("\nType yes after human labels are completed in the QA JSON files: ").strip().lower()
+        print(f"\nHuman label sheet: {human_label_sheet_path}")
+        answer = input("\nType yes after human labels are completed in the CSV: ").strip().lower()
         if answer != "yes":
             raise SystemExit("Stopped before certification because human labels were not confirmed.")
 
-        human_gold_records = validate_human_labels(human_gold_records)
+        human_gold_records = apply_human_label_sheet(human_label_sheet_path, human_gold_records)
         records_by_key = {record_key(record): record for record in human_gold_records}
         apply_checker_results(records_by_key, gold_checker_rows)
         human_gold_records = merge_checker_rows(human_gold_records, gold_checker_rows)

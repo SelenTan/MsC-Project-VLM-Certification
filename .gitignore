@@ -2,3 +2,5 @@
 /dataset
 /.venv
 __pycache__/
+.env*
+/runs/2026-06-08_Qwen2.5-VL-32B-Instruct_2

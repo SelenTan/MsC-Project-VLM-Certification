@@ -106,6 +106,15 @@ def iter_qa_paths(dataset_dir: Path, categories: Optional[Iterable[str]]) -> Ite
             yield qa_path
 
 
+def ordered_items(data: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(
+        data.get("items", []),
+        key=lambda item: TARGET_ORDER.index(item.get("target"))
+        if item.get("target") in TARGET_ORDER
+        else len(TARGET_ORDER),
+    )
+
+
 def image_data_url(image_path: Path) -> str:
     mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
     image_bytes = image_path.read_bytes()
@@ -198,7 +207,7 @@ def run_dataset(args: argparse.Namespace) -> int:
         data = json.loads(qa_path.read_text(encoding="utf-8"))
         changed = False
 
-        for item in data.get("items", []):
+        for item in ordered_items(data):
             if item.get("target") not in selected_targets:
                 continue
             if item.get("target_model_response") and not args.overwrite:
