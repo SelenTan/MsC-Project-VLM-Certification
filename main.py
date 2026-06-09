@@ -29,6 +29,7 @@ from artifacts import (
     write_json,
 )
 from certification import estimate_reliability, run_monte_carlo, summarize_certificates
+from dataset_selection import select_dataset_dir
 from model_server import ManagedServer, auto_select_gpus, auto_select_gpus_by_balanced_memory, start_vllm_server
 from reset_dataset import reset_dataset_fields
 from run_target_vlm import run_dataset as run_target_vlm_dataset
@@ -347,6 +348,11 @@ def reset_dataset_at_start() -> None:
 
 def main() -> None:
     """Run checker validation, pause for human labels, calculate certification, archive, and reset."""
+    global DATASET_DIR
+
+    DATASET_DIR = select_dataset_dir(PROJECT_ROOT, DATASET_DIR)
+    print(f"Using dataset directory: {DATASET_DIR}")
+
     run_name = RUN_NAME or default_run_name(TARGET_MODEL_NAME)
     run_dir = create_run_dir(PROJECT_ROOT, RUNS_DIR, run_name)
     run_name = run_dir.name

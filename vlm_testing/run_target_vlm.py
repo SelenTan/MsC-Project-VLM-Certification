@@ -16,6 +16,7 @@ from urllib import error, request
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
+from dataset_selection import select_dataset_dir  # noqa: E402
 from model_server import ManagedServer, auto_select_gpus, start_vllm_server  # noqa: E402
 
 TARGET_ORDER = ("visual_factuality", "robustness", "refusal_behavior")
@@ -40,7 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Deploy the target VLM locally, run QA JSON files, and fill target_model_response."
     )
-    parser.add_argument("--dataset-dir", default="dataset", help="Dataset directory.")
+    parser.add_argument(
+        "--dataset-dir",
+        default=None,
+        help="Dataset directory. If omitted and both dataset directories exist, choose interactively.",
+    )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Internal local vLLM port.")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Hugging Face model id to deploy.")
     parser.add_argument(
@@ -274,6 +279,9 @@ def maybe_start_target_server(args: argparse.Namespace) -> ManagedServer:
 
 def main() -> None:
     args = parse_args()
+    args.dataset_dir = args.dataset_dir or select_dataset_dir(PROJECT_ROOT)
+    print(f"Using dataset directory: {args.dataset_dir}")
+
     server = ManagedServer(process=None, log_path=None)
     try:
         server = maybe_start_target_server(args)

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 from pathlib import Path
 from typing import Any
 
@@ -38,10 +39,17 @@ def normalize_dataset_references(project_root: Path, dataset_dir: str = "dataset
     }
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Normalize checker reference fields in QA JSON files.")
+    parser.add_argument("--dataset-dir", default="dataset", help="Dataset directory relative to the project root.")
+    return parser.parse_args()
+
+
 def main() -> None:
-    """Normalize the project dataset in place and print a short summary."""
+    """Normalize the requested project dataset in place and print a short summary."""
+    args = parse_args()
     project_root = Path(__file__).resolve().parents[1]
-    summary = normalize_dataset_references(project_root)
+    summary = normalize_dataset_references(project_root, args.dataset_dir)
     print("Dataset checker references normalized.")
     print(f"Dataset: {summary['dataset_dir']}")
     print(f"Files changed: {summary['files_changed']}")
