@@ -29,7 +29,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "['wrench', 'spanner', 'adjustable spanner', 'adjustable wrench', 'monkey wrench', 'crescent wrench', 'pipe wrench']",
+      "checker_reference_evidence": "Visible document text, tables, figures, or OCR content needed for the selected DocVQA answer. Source question: What object is thrown to the Music Master before he enters the pipe?",
+      "checker_reference_values": []
     },
     {
       "item_id": "documents_0010_002",
@@ -49,7 +52,10 @@
       "notes": "Robustness variant: blur.",
       "variant_image_paths": [
         "dataset/documents/robust/documents_0010_blur.jpg"
-      ]
+      ],
+      "checker_reference_answer": "['wrench', 'spanner', 'adjustable spanner', 'adjustable wrench', 'monkey wrench', 'crescent wrench', 'pipe wrench']",
+      "checker_reference_evidence": "Visible document text, tables, figures, or OCR content needed for the selected DocVQA answer. Source question: What object is thrown to the Music Master before he enters the pipe?",
+      "checker_reference_values": []
     },
     {
       "item_id": "documents_0010_003",
@@ -67,7 +73,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

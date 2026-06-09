@@ -29,7 +29,28 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: 1; COMPANY; TOBACCO; Lorillard; DATE:; NAME:; OFFICE:; 14; COMMENTS:; CC:; 91914407; 06/; 29/; 94; 08:; 25; LORILLARD; JAX; SALES; GENERAL; NY; 001; 9143; PHILLIPS; HWY.; SUITE; 120.; JACKSONVILLE,; FL; 32256; TELEPHONE; (904); 464; 0800; FAX; 744; FACSIMILE; COVER; PAGE; 6-; 29-; TOTAL; PAGES; (INCLUDING; SHEET); PLEASE; DELIVER",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "1",
+        "14",
+        "91914407",
+        "06",
+        "29",
+        "94",
+        "08",
+        "25",
+        "001",
+        "9143",
+        "120",
+        "32256",
+        "904",
+        "464",
+        "0800",
+        "744",
+        "6"
+      ]
     },
     {
       "item_id": "forms_0001_002",
@@ -49,6 +70,27 @@
       "notes": "Robustness variant: compression.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0001_compression.jpg"
+      ],
+      "checker_reference_answer": "visible_words: 1; COMPANY; TOBACCO; Lorillard; DATE:; NAME:; OFFICE:; 14; COMMENTS:; CC:; 91914407; 06/; 29/; 94; 08:; 25; LORILLARD; JAX; SALES; GENERAL; NY; 001; 9143; PHILLIPS; HWY.; SUITE; 120.; JACKSONVILLE,; FL; 32256; TELEPHONE; (904); 464; 0800; FAX; 744; FACSIMILE; COVER; PAGE; 6-; 29-; TOTAL; PAGES; (INCLUDING; SHEET); PLEASE; DELIVER",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "1",
+        "14",
+        "91914407",
+        "06",
+        "29",
+        "94",
+        "08",
+        "25",
+        "001",
+        "9143",
+        "120",
+        "32256",
+        "904",
+        "464",
+        "0800",
+        "744",
+        "6"
       ]
     },
     {
@@ -67,7 +109,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

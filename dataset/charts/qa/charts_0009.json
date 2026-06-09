@@ -29,7 +29,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Valvoline",
+      "checker_reference_evidence": "Visible chart title, axes, labels, legend, and plotted values needed for the source ChartQA answer. Source question: What brand was in second place in the United States fast lubes market?",
+      "checker_reference_values": []
     },
     {
       "item_id": "charts_0009_002",
@@ -49,7 +52,10 @@
       "notes": "Robustness variant: rotate_15.",
       "variant_image_paths": [
         "dataset/charts/robust/charts_0009_rotate_15.jpg"
-      ]
+      ],
+      "checker_reference_answer": "Valvoline",
+      "checker_reference_evidence": "Visible chart title, axes, labels, legend, and plotted values needed for the source ChartQA answer. Source question: What brand was in second place in the United States fast lubes market?",
+      "checker_reference_values": []
     },
     {
       "item_id": "charts_0009_003",
@@ -67,7 +73,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

@@ -29,7 +29,13 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible receipt evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "26,000",
+      "checker_reference_evidence": "Visible receipt text and the CORD total.total_price field. Source question: What is the total price shown on this receipt?",
+      "checker_reference_values": [
+        "26,000",
+        "26000"
+      ]
     },
     {
       "item_id": "receipts_0008_002",
@@ -49,6 +55,12 @@
       "notes": "Robustness variant: low_contrast.",
       "variant_image_paths": [
         "dataset/receipts/robust/receipts_0008_low_contrast.jpg"
+      ],
+      "checker_reference_answer": "26,000",
+      "checker_reference_evidence": "Visible receipt text and the CORD total.total_price field. Source question: What is the total price shown on this receipt?",
+      "checker_reference_values": [
+        "26,000",
+        "26000"
       ]
     },
     {
@@ -67,7 +79,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the receipt image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

@@ -29,7 +29,17 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: DATE:; INITIATED; BY:; COMPLETION; COUNTRY:; PRODUCT:; BELGIUM; NOTES:; 620429480; RECEIVED; SERVICE; REQUEST; FROM; R; &; D; BY; INTERNATIONAL; LICENSEE; OPERATIONS; NO.:; 25-; 84; March; 27,; 1984; P.; H.; HARPER; PHH; TARGET; April; 13,; LUCKY; STRIKE; Filter; and; VICEROY; NATURE; OF; WORK:; Advise; if; locally; obtained; Yucatan; Honey",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "620429480",
+        "25",
+        "84",
+        "27",
+        "1984",
+        "13"
+      ]
     },
     {
       "item_id": "forms_0011_002",
@@ -49,6 +59,16 @@
       "notes": "Robustness variant: compression.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0011_compression.jpg"
+      ],
+      "checker_reference_answer": "visible_words: DATE:; INITIATED; BY:; COMPLETION; COUNTRY:; PRODUCT:; BELGIUM; NOTES:; 620429480; RECEIVED; SERVICE; REQUEST; FROM; R; &; D; BY; INTERNATIONAL; LICENSEE; OPERATIONS; NO.:; 25-; 84; March; 27,; 1984; P.; H.; HARPER; PHH; TARGET; April; 13,; LUCKY; STRIKE; Filter; and; VICEROY; NATURE; OF; WORK:; Advise; if; locally; obtained; Yucatan; Honey",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "620429480",
+        "25",
+        "84",
+        "27",
+        "1984",
+        "13"
       ]
     },
     {
@@ -67,7 +87,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

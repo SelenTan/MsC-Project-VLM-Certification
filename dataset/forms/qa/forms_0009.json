@@ -29,7 +29,23 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: SIGNED; DATE; TOTAL:; CLIENT; PROGRAM; STATIONS; RS#39; RS; Accounting; Batten,; Barton,; Durstine; &; Osborn; INCORPORATED; CHANGE; IN; RADIO; SCHEDULE; WHAS; 11/3/56; 10/26/57; THE; AMERICAN; TOBACCO; COMPANY; (LUCKY; STRIKE); 1/2; HOUR; PROGRAMES; LOUISVILLE,; KENTUCKY; CONTRACT; #1032; ENTIRE; CANCELLED; LAST; BROADCAST; SATURDAY,; APRIL; 13,; 1957; REVISED",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "39",
+        "11",
+        "3",
+        "56",
+        "10",
+        "26",
+        "57",
+        "1",
+        "2",
+        "1032",
+        "13",
+        "1957"
+      ]
     },
     {
       "item_id": "forms_0009_002",
@@ -49,6 +65,22 @@
       "notes": "Robustness variant: rotate_15.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0009_rotate_15.jpg"
+      ],
+      "checker_reference_answer": "visible_words: SIGNED; DATE; TOTAL:; CLIENT; PROGRAM; STATIONS; RS#39; RS; Accounting; Batten,; Barton,; Durstine; &; Osborn; INCORPORATED; CHANGE; IN; RADIO; SCHEDULE; WHAS; 11/3/56; 10/26/57; THE; AMERICAN; TOBACCO; COMPANY; (LUCKY; STRIKE); 1/2; HOUR; PROGRAMES; LOUISVILLE,; KENTUCKY; CONTRACT; #1032; ENTIRE; CANCELLED; LAST; BROADCAST; SATURDAY,; APRIL; 13,; 1957; REVISED",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "39",
+        "11",
+        "3",
+        "56",
+        "10",
+        "26",
+        "57",
+        "1",
+        "2",
+        "1032",
+        "13",
+        "1957"
       ]
     },
     {
@@ -67,7 +99,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

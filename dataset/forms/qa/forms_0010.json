@@ -29,7 +29,16 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: DATE:; SUPPLIER:; PREVIOUS; $; COMMITMENTS; THIS; PROJECI:; REASONS:; COMMITTED; TO; DATE; Year); (Current; BEATTY; A.; D.; T.; E.; SPROUGE; ALBERT; B.; ORIGINAL; CC:; PROJECTED:; 681925147; CHANGE; OF; AUTHORIZED; COST; AUTHORIZATION; NO.:; NP; -75; 11/; 28/; 84; PROJECT; NAME:; GEMINI; AWARENESS; ATTITUDE; &; USAGE; MONITOR.; -",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "681925147",
+        "-75",
+        "11",
+        "28",
+        "84"
+      ]
     },
     {
       "item_id": "forms_0010_002",
@@ -49,6 +58,15 @@
       "notes": "Robustness variant: blur.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0010_blur.jpg"
+      ],
+      "checker_reference_answer": "visible_words: DATE:; SUPPLIER:; PREVIOUS; $; COMMITMENTS; THIS; PROJECI:; REASONS:; COMMITTED; TO; DATE; Year); (Current; BEATTY; A.; D.; T.; E.; SPROUGE; ALBERT; B.; ORIGINAL; CC:; PROJECTED:; 681925147; CHANGE; OF; AUTHORIZED; COST; AUTHORIZATION; NO.:; NP; -75; 11/; 28/; 84; PROJECT; NAME:; GEMINI; AWARENESS; ATTITUDE; &; USAGE; MONITOR.; -",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "681925147",
+        "-75",
+        "11",
+        "28",
+        "84"
       ]
     },
     {
@@ -67,7 +85,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

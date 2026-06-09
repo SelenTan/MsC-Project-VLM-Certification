@@ -29,7 +29,12 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "answers: The stars given to \"The Great Northern\" are 5. | visible_ui_text: 5",
+      "checker_reference_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: How many stars are given to \"The Great Northern\"?",
+      "checker_reference_values": [
+        "5"
+      ]
     },
     {
       "item_id": "screenshots_0004_002",
@@ -49,6 +54,11 @@
       "notes": "Robustness variant: rotate_15.",
       "variant_image_paths": [
         "dataset/screenshots/robust/screenshots_0004_rotate_15.jpg"
+      ],
+      "checker_reference_answer": "answers: The stars given to \"The Great Northern\" are 5. | visible_ui_text: 5",
+      "checker_reference_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: How many stars are given to \"The Great Northern\"?",
+      "checker_reference_values": [
+        "5"
       ]
     },
     {
@@ -67,7 +77,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

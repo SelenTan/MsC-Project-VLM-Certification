@@ -29,7 +29,25 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: Location; Division; Invitations:; Mugs; Posters; 720; 40; 20; 100; 50; Unknown; #Requested; Date; Rec'd; Attendees:; Counter; Floor; 15; 9; 35; 10; Food; Cleanliness; Service; Fair; Average; X; Excellent; cc:; 92091873; 6/; 12/; 95; NEWPORT; RACING; EVENT; SURVEY; Leguna; Seca,; Monterey,; Ca; San; Jose/; 933; T.; L.; Roberts; (s); September",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "720",
+        "40",
+        "20",
+        "100",
+        "50",
+        "15",
+        "9",
+        "35",
+        "10",
+        "92091873",
+        "6",
+        "12",
+        "95",
+        "933"
+      ]
     },
     {
       "item_id": "forms_0004_002",
@@ -49,6 +67,24 @@
       "notes": "Robustness variant: rotate_15.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0004_rotate_15.jpg"
+      ],
+      "checker_reference_answer": "visible_words: Location; Division; Invitations:; Mugs; Posters; 720; 40; 20; 100; 50; Unknown; #Requested; Date; Rec'd; Attendees:; Counter; Floor; 15; 9; 35; 10; Food; Cleanliness; Service; Fair; Average; X; Excellent; cc:; 92091873; 6/; 12/; 95; NEWPORT; RACING; EVENT; SURVEY; Leguna; Seca,; Monterey,; Ca; San; Jose/; 933; T.; L.; Roberts; (s); September",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "720",
+        "40",
+        "20",
+        "100",
+        "50",
+        "15",
+        "9",
+        "35",
+        "10",
+        "92091873",
+        "6",
+        "12",
+        "95",
+        "933"
       ]
     },
     {
@@ -67,7 +103,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

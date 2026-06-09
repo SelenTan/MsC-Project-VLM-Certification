@@ -29,7 +29,24 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: ☑; ORIGINAL; Subject; State:; Local:; 1.; 3.; 4.; Yes; ☐; GPR; PRO; Agency; 262-6423; Date; 2-2-83; 680534113; 1981; Session; Amendment; No.; if; Applicable; LRB; 1946; Or; Bill; han; Au; No; UPDATED; SUPPLEMENTAL; CORRECTED; FISCAL; ESTIMATE; AD; MBA; 23; (Rev; 11/80; Regulation; of; Smoking; Public; Places; Fiscal; Effect",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "1",
+        "3",
+        "4",
+        "262",
+        "6423",
+        "2",
+        "83",
+        "680534113",
+        "1981",
+        "1946",
+        "23",
+        "11",
+        "80"
+      ]
     },
     {
       "item_id": "forms_0019_002",
@@ -49,6 +66,23 @@
       "notes": "Robustness variant: rotate_15.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0019_rotate_15.jpg"
+      ],
+      "checker_reference_answer": "visible_words: ☑; ORIGINAL; Subject; State:; Local:; 1.; 3.; 4.; Yes; ☐; GPR; PRO; Agency; 262-6423; Date; 2-2-83; 680534113; 1981; Session; Amendment; No.; if; Applicable; LRB; 1946; Or; Bill; han; Au; No; UPDATED; SUPPLEMENTAL; CORRECTED; FISCAL; ESTIMATE; AD; MBA; 23; (Rev; 11/80; Regulation; of; Smoking; Public; Places; Fiscal; Effect",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "1",
+        "3",
+        "4",
+        "262",
+        "6423",
+        "2",
+        "83",
+        "680534113",
+        "1981",
+        "1946",
+        "23",
+        "11",
+        "80"
       ]
     },
     {
@@ -67,7 +101,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

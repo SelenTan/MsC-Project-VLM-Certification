@@ -29,7 +29,28 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: DATE; TIME; NAME:; OFFICE:; 11/4/93; COMMENTS:; cc:; 91372360; Lorillard; TOBACCO; COMPANY; Nov.; 4; 93; 16:33; KONICA; FAX; 285; P.; 1; 101; N.; CLASSEN; BLVD.; SUITE; 102.; OKLAHOMA; CITY; OK.; 73118; TELEPHONE; 405); 543-; 0455; or; 04600460; FACSIMILE; COVER; PAGE; 3:28; CST; The; following; document,; including; cover; page; is; 3; pages; long.; PLEASE",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "11",
+        "4",
+        "93",
+        "91372360",
+        "16",
+        "33",
+        "285",
+        "1",
+        "101",
+        "102",
+        "73118",
+        "405",
+        "543",
+        "0455",
+        "04600460",
+        "3",
+        "28"
+      ]
     },
     {
       "item_id": "forms_0008_002",
@@ -49,6 +70,27 @@
       "notes": "Robustness variant: low_contrast.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0008_low_contrast.jpg"
+      ],
+      "checker_reference_answer": "visible_words: DATE; TIME; NAME:; OFFICE:; 11/4/93; COMMENTS:; cc:; 91372360; Lorillard; TOBACCO; COMPANY; Nov.; 4; 93; 16:33; KONICA; FAX; 285; P.; 1; 101; N.; CLASSEN; BLVD.; SUITE; 102.; OKLAHOMA; CITY; OK.; 73118; TELEPHONE; 405); 543-; 0455; or; 04600460; FACSIMILE; COVER; PAGE; 3:28; CST; The; following; document,; including; cover; page; is; 3; pages; long.; PLEASE",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "11",
+        "4",
+        "93",
+        "91372360",
+        "16",
+        "33",
+        "285",
+        "1",
+        "101",
+        "102",
+        "73118",
+        "405",
+        "543",
+        "0455",
+        "04600460",
+        "3",
+        "28"
       ]
     },
     {
@@ -67,7 +109,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

@@ -29,7 +29,15 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: TO:; FROM:; DATE:; Air; Auto; Train; Other; Dates; Boston; XX; X; 80728670; FIELD; TRIP; J.; R.; Mueller; Mary; Anne; Kayiatos; 2; /28; /84; Please; make; the; necessary; Field; Trip; arrangements; for; Ted; van; de; kamp; Purpose; of; trip; To; evaluate; Satin's; overall; performance; and; results; Special; Cities.; Division; (s); to; be; contacted",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "80728670",
+        "2",
+        "28",
+        "84"
+      ]
     },
     {
       "item_id": "forms_0017_002",
@@ -49,6 +57,14 @@
       "notes": "Robustness variant: crop.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0017_crop.jpg"
+      ],
+      "checker_reference_answer": "visible_words: TO:; FROM:; DATE:; Air; Auto; Train; Other; Dates; Boston; XX; X; 80728670; FIELD; TRIP; J.; R.; Mueller; Mary; Anne; Kayiatos; 2; /28; /84; Please; make; the; necessary; Field; Trip; arrangements; for; Ted; van; de; kamp; Purpose; of; trip; To; evaluate; Satin's; overall; performance; and; results; Special; Cities.; Division; (s); to; be; contacted",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "80728670",
+        "2",
+        "28",
+        "84"
       ]
     },
     {
@@ -67,7 +83,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

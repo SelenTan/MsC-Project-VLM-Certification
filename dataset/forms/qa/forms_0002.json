@@ -29,7 +29,40 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "visible_words: SUBJECT:; SAMPLE:; CIGARETTES:; TAR; 9.1; NIC; .88; MOIST; 14.0; MENT; .841; PREFERENCE:; Bright; 39; 34; 43; 35; 42; 8; 9; 11; 6; 200; 100; ATTRIBUTES:; 53+++; 60+++; 46; 56+++; 50; (n=); Total; Male; Female; 35+; KL; 4.51; 4.45; 4.09**; 4.59; 4.31***; 3.60**; 3.64***; 3.39***; 3.12***",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "9.1",
+        "88",
+        "14",
+        "841",
+        "39",
+        "34",
+        "43",
+        "35",
+        "42",
+        "8",
+        "9",
+        "11",
+        "6",
+        "200",
+        "100",
+        "53",
+        "60",
+        "46",
+        "56",
+        "50",
+        "4.51",
+        "4.45",
+        "4.09",
+        "4.59",
+        "4.31",
+        "3.6",
+        "3.64",
+        "3.39",
+        "3.12"
+      ]
     },
     {
       "item_id": "forms_0002_002",
@@ -49,6 +82,39 @@
       "notes": "Robustness variant: crop.",
       "variant_image_paths": [
         "dataset/forms/robust/forms_0002_crop.jpg"
+      ],
+      "checker_reference_answer": "visible_words: SUBJECT:; SAMPLE:; CIGARETTES:; TAR; 9.1; NIC; .88; MOIST; 14.0; MENT; .841; PREFERENCE:; Bright; 39; 34; 43; 35; 42; 8; 9; 11; 6; 200; 100; ATTRIBUTES:; 53+++; 60+++; 46; 56+++; 50; (n=); Total; Male; Female; 35+; KL; 4.51; 4.45; 4.09**; 4.59; 4.31***; 3.60**; 3.64***; 3.39***; 3.12***",
+      "checker_reference_evidence": "Visible form text, labels, field names, and field values. Source question: What visible field names and field values can be read from this form?",
+      "checker_reference_values": [
+        "9.1",
+        "88",
+        "14",
+        "841",
+        "39",
+        "34",
+        "43",
+        "35",
+        "42",
+        "8",
+        "9",
+        "11",
+        "6",
+        "200",
+        "100",
+        "53",
+        "60",
+        "46",
+        "56",
+        "50",
+        "4.51",
+        "4.45",
+        "4.09",
+        "4.59",
+        "4.31",
+        "3.6",
+        "3.64",
+        "3.39",
+        "3.12"
       ]
     },
     {
@@ -67,7 +133,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {

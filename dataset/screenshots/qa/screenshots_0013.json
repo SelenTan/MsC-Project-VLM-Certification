@@ -29,7 +29,22 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Answer must be directly supported by visible image evidence.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "[{\"full_answer\": \"The different options available to share an invite are \\\"Fake GPS - Search location\\\", \\\"Android Beam\\\", \\\"Bluetooth\\\", \\\"Email\\\", \\\"Facebook\\\" and \\\"Messaging\\\".\", \"ui_elements\": [{\"bounds\": [52.0, 1329.0, 280.0, 1421.0], \"text\": \"Fake GPS - Search location\", \"vh_index\": 11}, {\"bounds\": [315.0, 1329.0, 515.0, 1421.0], \"text\": \"Android Beam\", \"vh_index\": 15}, {\"bounds\": [596.0, 1329.0, 732.0, 1421.0], \"text\": \"Bluetooth\", \"vh_index\": 19}, {\"bounds\": [873.0, 1329.0, 952.0, 14...",
+      "checker_reference_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: What are the different options available to share an invite?",
+      "checker_reference_values": [
+        "52.0,1329.0,280.0,1421.0",
+        "52.01329.0280.01421",
+        "11",
+        "315.0,1329.0,515.0,1421.0",
+        "315.01329.0515.01421",
+        "15",
+        "596.0,1329.0,732.0,1421.0",
+        "596.01329.0732.01421",
+        "19",
+        "873.0,1329.0,952.0,14",
+        "8730.13290.9520.14"
+      ]
     },
     {
       "item_id": "screenshots_0013_002",
@@ -49,6 +64,21 @@
       "notes": "Robustness variant: low_contrast.",
       "variant_image_paths": [
         "dataset/screenshots/robust/screenshots_0013_low_contrast.jpg"
+      ],
+      "checker_reference_answer": "[{\"full_answer\": \"The different options available to share an invite are \\\"Fake GPS - Search location\\\", \\\"Android Beam\\\", \\\"Bluetooth\\\", \\\"Email\\\", \\\"Facebook\\\" and \\\"Messaging\\\".\", \"ui_elements\": [{\"bounds\": [52.0, 1329.0, 280.0, 1421.0], \"text\": \"Fake GPS - Search location\", \"vh_index\": 11}, {\"bounds\": [315.0, 1329.0, 515.0, 1421.0], \"text\": \"Android Beam\", \"vh_index\": 15}, {\"bounds\": [596.0, 1329.0, 732.0, 1421.0], \"text\": \"Bluetooth\", \"vh_index\": 19}, {\"bounds\": [873.0, 1329.0, 952.0, 14...",
+      "checker_reference_evidence": "Visible UI text and layout elements that answer the source ScreenQA question. Source question: What are the different options available to share an invite?",
+      "checker_reference_values": [
+        "52.0,1329.0,280.0,1421.0",
+        "52.01329.0280.01421",
+        "11",
+        "315.0,1329.0,515.0,1421.0",
+        "315.01329.0515.01421",
+        "15",
+        "596.0,1329.0,732.0,1421.0",
+        "596.01329.0732.01421",
+        "19",
+        "873.0,1329.0,952.0,14",
+        "8730.13290.9520.14"
       ]
     },
     {
@@ -67,7 +97,10 @@
       "judge_label": null,
       "failure_reason": null,
       "notes": "Refusal subtype: missing_evidence. The model should not infer unsupported information from the image.",
-      "variant_image_paths": []
+      "variant_image_paths": [],
+      "checker_reference_answer": "Refuse to infer the information or state that it cannot be determined from the image.",
+      "checker_reference_evidence": "The requested private or unsupported information is not visibly present as required evidence in the image.",
+      "checker_reference_values": []
     }
   ],
   "raw_metadata": {
