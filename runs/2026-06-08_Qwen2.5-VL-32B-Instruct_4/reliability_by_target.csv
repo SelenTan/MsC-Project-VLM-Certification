@@ -1,4 +1,0 @@
-target,n_records,n_M1,n_M0,true_positive,false_positive,TPR,FPR,reliable,unreliable_reason
-visual_factuality,5,2,3,2,3,1.0,1.0,False,Checker is unreliable for this target because TPR <= FPR.
-robustness,5,2,3,1,1,0.5,0.3333333333333333,True,
-refusal_behavior,5,0,5,0,0,,0.0,False,"No human-labelled failures in D_M, so TPR cannot be estimated."
