@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from normalization import build_checker_reference_fields
+
 
 VARIABLE_FIELDS = ("target_model_response", "human_label", "judge_label", "failure_reason")
 
@@ -47,7 +49,9 @@ def load_records(project_root: Path, dataset_dir: str, targets: Iterable[str]) -
 
     for qa_path in sorted(dataset_path.glob("*/qa/*.json")):
         data = json.loads(qa_path.read_text(encoding="utf-8"))
-        for item_index, item in enumerate(data.get("items", [])):
+        items = data.get("items", [])
+        visual_item = next((source_item for source_item in items if source_item.get("target") == "visual_factuality"), {})
+        for item_index, item in enumerate(items):
             if item.get("target") not in selected_targets:
                 continue
             image_path = item.get("image_path") or data.get("image_path")
@@ -57,6 +61,14 @@ def load_records(project_root: Path, dataset_dir: str, targets: Iterable[str]) -
                 if item.get("target") == "robustness" and variant_paths
                 else image_path
             )
+            checker_fields = {
+                **build_checker_reference_fields(item),
+                **{
+                    key: item[key]
+                    for key in ("checker_reference_answer", "checker_reference_evidence", "checker_reference_values")
+                    if key in item
+                },
+            }
             record = {
                 "qa_json_path": qa_path.relative_to(project_root).as_posix(),
                 "qa_json_abs_path": str(qa_path),
@@ -70,11 +82,16 @@ def load_records(project_root: Path, dataset_dir: str, targets: Iterable[str]) -
                 "prompt": item.get("prompt"),
                 "expected_evidence": item.get("expected_evidence"),
                 "expected_answer_or_behavior": item.get("expected_answer_or_behavior"),
+                "checker_reference_answer": checker_fields["checker_reference_answer"],
+                "checker_reference_evidence": checker_fields["checker_reference_evidence"],
+                "checker_reference_values": checker_fields["checker_reference_values"],
                 "source_index": item.get("source_index"),
                 "hf_id": item.get("hf_id"),
                 "image_path": image_path,
                 "model_input_image_path": model_input_image_path,
                 "variant_image_paths": json.dumps(variant_paths, ensure_ascii=False),
+                "original_expected_answer_or_behavior": visual_item.get("expected_answer_or_behavior"),
+                "original_target_model_response": visual_item.get("target_model_response"),
                 "target_model_response": item.get("target_model_response"),
                 "human_label": item.get("human_label"),
                 "judge_label": item.get("judge_label"),
@@ -164,6 +181,7 @@ def sample_human_gold_pool(
     targets: tuple[str, ...],
     per_target: int,
     seed: int,
+    balance_by_image_type: bool = False,
 ) -> list[dict[str, Any]]:
     rng = random.Random(seed)
     selected: list[dict[str, Any]] = []
@@ -171,7 +189,38 @@ def sample_human_gold_pool(
         target_records = [record for record in records if record["target"] == target]
         if len(target_records) < per_target:
             raise ValueError(f"Target {target} has {len(target_records)} records, need {per_target}.")
-        selected.extend(rng.sample(target_records, per_target))
+        if balance_by_image_type:
+            selected.extend(sample_balanced_by_image_type(target_records, per_target, rng))
+        else:
+            selected.extend(rng.sample(target_records, per_target))
+    return selected
+
+
+def sample_balanced_by_image_type(records: list[dict[str, Any]], sample_size: int, rng: random.Random) -> list[dict[str, Any]]:
+    """Sample records round-robin across image_type groups for broader gold-pool coverage."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        groups.setdefault(record["image_type"], []).append(record)
+    for group_records in groups.values():
+        rng.shuffle(group_records)
+
+    image_types = sorted(groups)
+    rng.shuffle(image_types)
+    selected: list[dict[str, Any]] = []
+    while len(selected) < sample_size and image_types:
+        next_image_types: list[str] = []
+        for image_type in image_types:
+            group = groups[image_type]
+            if group:
+                selected.append(group.pop())
+            if group:
+                next_image_types.append(image_type)
+            if len(selected) == sample_size:
+                break
+        image_types = next_image_types
+
+    if len(selected) != sample_size:
+        raise ValueError(f"Could only sample {len(selected)} records, need {sample_size}.")
     return selected
 
 
@@ -280,14 +329,17 @@ def make_charts(run_dir: Path, reliability_rows: list[dict[str, Any]], certifica
     charts_dir.mkdir(exist_ok=True)
 
     targets = [row["target"] for row in reliability_rows]
-    x_positions = range(len(targets))
+    x_positions = list(range(len(targets)))
     tpr_values = [row["TPR"] if row["TPR"] is not None else 0 for row in reliability_rows]
     fpr_values = [row["FPR"] if row["FPR"] is not None else 0 for row in reliability_rows]
+    reliability_labels = [
+        f"{row['target']}\nM1={row['n_M1']}, M0={row['n_M0']}" for row in reliability_rows
+    ]
 
     plt.figure(figsize=(8, 4))
     plt.bar([x - 0.2 for x in x_positions], tpr_values, width=0.4, label="TPR")
     plt.bar([x + 0.2 for x in x_positions], fpr_values, width=0.4, label="FPR")
-    plt.xticks(list(x_positions), targets, rotation=20, ha="right")
+    plt.xticks(x_positions, reliability_labels)
     plt.ylim(0, 1)
     plt.ylabel("Rate")
     plt.title("AI Checker Reliability by Target")
@@ -298,12 +350,17 @@ def make_charts(run_dir: Path, reliability_rows: list[dict[str, Any]], certifica
 
     alpha_values = [row["alpha_median"] if row["alpha_median"] is not None else 0 for row in certificate_rows]
     if certificate_rows:
+        certificate_labels = [
+            f"{row['target']}\ncert={row['certified_rate']:.2f}"
+            if row.get("certified_rate") is not None
+            else row["target"]
+            for row in certificate_rows
+        ]
         plt.figure(figsize=(8, 4))
-        plt.bar([row["target"] for row in certificate_rows], alpha_values)
+        plt.bar(certificate_labels, alpha_values)
         plt.ylim(0, 1)
         plt.ylabel("Median certifiable alpha")
         plt.title("Certificate Alpha by Target")
-        plt.xticks(rotation=20, ha="right")
         plt.tight_layout()
         plt.savefig(charts_dir / "certifiable_alpha_by_target.png", dpi=160)
         plt.close()
@@ -338,7 +395,6 @@ def export_run_artifacts(
     checker_model: str,
     config: dict[str, Any],
     human_gold_records: list[dict[str, Any]],
-    gold_checker_rows: list[dict[str, Any]],
     evaluation_checker_rows: list[dict[str, Any]],
     reliability_rows: list[dict[str, Any]],
     monte_carlo_rows: list[dict[str, Any]],
@@ -348,7 +404,6 @@ def export_run_artifacts(
     """Persist the completed run in compact CSV, QA snapshot, log, and chart form."""
     write_json(run_dir / "run_config.json", config)
     write_csv(run_dir / "human_gold_pool.csv", add_run_metadata(human_gold_records, run_name, target_model, checker_model))
-    write_csv(run_dir / "judge_labels_gold.csv", gold_checker_rows)
     write_csv(run_dir / "judge_labels_evaluation.csv", evaluation_checker_rows)
     write_csv(run_dir / "reliability_by_target.csv", reliability_rows)
     write_csv(run_dir / "monte_carlo_repeats.csv", monte_carlo_rows)

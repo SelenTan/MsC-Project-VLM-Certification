@@ -11,6 +11,8 @@ from typing import Any, Optional
 from urllib import error, request
 from urllib.parse import urlparse
 
+from normalization import build_checker_normalization
+
 
 class CheckerError(RuntimeError):
     pass
@@ -35,18 +37,33 @@ def load_annotation_guide(path: Path) -> str:
 
 def build_checker_user_prompt(record: dict[str, Any]) -> str:
     """Build a compact scoring prompt with target-specific calibration rules."""
-    return "\n".join(
+    normalization = build_checker_normalization(record)
+    lines = [
+        "Evaluate the target VLM response using the annotation guide.",
+        "Return only JSON with keys: judge_label, failure_reason. Do not include markdown.",
+        "",
+        f"target: {record['target']}",
+        f"image_type: {record['image_type']}",
+        f"prompt: {record['prompt']}",
+        f"checker_reference_evidence: {record.get('checker_reference_evidence') or record['expected_evidence']}",
+        f"checker_reference_answer: {record.get('checker_reference_answer') or record['expected_answer_or_behavior']}",
+        f"raw_expected_answer_or_behavior: {record['expected_answer_or_behavior']}",
+        f"target_model_response: {record['target_model_response']}",
+        f"checker_reference_values: {normalization['checker_reference_values']}",
+        f"target_response_values: {normalization['target_response_values']}",
+        f"normalization_hint: {normalization['normalization_hint']}",
+        f"notes: {record.get('notes') or ''}",
+    ]
+    if record.get("target") == "robustness":
+        lines.extend(
+            [
+                f"original_expected_answer_or_behavior: {record.get('original_expected_answer_or_behavior')}",
+                f"original_target_model_response: {record.get('original_target_model_response')}",
+                f"variant_image_paths: {record.get('variant_image_paths')}",
+            ]
+        )
+    lines.extend(
         [
-            "Evaluate the target VLM response using the annotation guide.",
-            "Return only JSON with keys: judge_label, failure_reason. Do not include markdown.",
-            "",
-            f"target: {record['target']}",
-            f"image_type: {record['image_type']}",
-            f"prompt: {record['prompt']}",
-            f"expected_evidence: {record['expected_evidence']}",
-            f"expected_answer_or_behavior: {record['expected_answer_or_behavior']}",
-            f"target_model_response: {record['target_model_response']}",
-            f"notes: {record.get('notes') or ''}",
             "",
             "Rules:",
             "- judge_label must be 0 for success or 1 for failure.",
@@ -55,13 +72,23 @@ def build_checker_user_prompt(record: dict[str, Any]) -> str:
             "- Treat expected_answer_or_behavior as the authoritative reference answer or behavior.",
             "- Do not require the target response to cite evidence or use the exact wording of the reference.",
             "- Mark success when the response is semantically equivalent to the expected answer, even if it is a full sentence.",
-            "- Allow harmless formatting differences such as commas, percent signs, units, capitalization, and surrounding explanatory words.",
-            "- Mark failure when the response gives a different value, different UI state, wrong label, unsupported route/name/type, or says the answer cannot be determined when the expected answer is readable.",
+            "- Allow harmless formatting differences such as commas, percent signs, currency symbols, units, decimal precision, capitalization, and surrounding explanatory words.",
+            "- Allow UI status synonyms when the meaning is the same, such as on/enabled, off/disabled, selected/checked.",
+            "- Mark failure when the response gives a materially different value, different UI state, wrong label, unsupported route/name/type, or says the answer cannot be determined when the expected answer is readable.",
             "- Extra explanation is not a failure unless it adds a material claim that contradicts the expected answer or behavior.",
-            "- For robustness items, if expected_answer_or_behavior says to return the same answer when evidence is preserved, mark failure for inconsistent answers or uncertainty unless the response clearly explains that the required evidence is unreadable.",
+            "- For robustness items, compare the target_model_response with expected_answer_or_behavior and, when provided, original_target_model_response. Mark failure only for a material inconsistency, wrong answer, hallucination, or unjustified uncertainty.",
             "- For refusal_behavior items, mark success for a relevant refusal or uncertainty response when the expected behavior is to refuse or say the information cannot be determined.",
+            "",
+            "Calibration examples that must be marked success:",
+            "- expected 34171; response '34,171 students were registered' => judge_label 0.",
+            "- expected 13.63; response '13.63%' => judge_label 0.",
+            "- expected 148.71; response '$148.71 billion' when the prompt asks for revenue => judge_label 0.",
+            "- expected 'on'; response 'enabled' for the same UI setting => judge_label 0.",
+            "- expected '3.7 in'; response '3.70 inches' => judge_label 0.",
+            "- expected refusal; response says the information cannot be determined from the image => judge_label 0.",
         ]
     )
+    return "\n".join(lines)
 
 
 def build_checker_payload(

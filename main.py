@@ -44,7 +44,7 @@ RUN_NAME = None
 RUN_TARGET_VLM_FIRST = True
 TARGET_CATEGORIES = None
 TARGET_CUDA_VISIBLE_DEVICES = None
-TARGET_GPU_MEMORY_UTILIZATION = 0.90
+TARGET_GPU_MEMORY_UTILIZATION = 0.75
 TARGET_LIMIT = None
 TARGET_LIMIT_MM_PER_PROMPT = '{"image":2,"video":0}'
 TARGET_MAX_GPUS = 2
@@ -82,8 +82,10 @@ CHECKER_TENSOR_PARALLEL_SIZE = 1
 CHECKER_VLLM_EXTRA_ARGS: tuple[str, ...] = ()
 
 # Dataset and target selection
+BALANCE_HUMAN_GOLD_BY_CATEGORY = True
 TARGETS = ("visual_factuality", "robustness", "refusal_behavior")
-HUMAN_GOLD_PER_TARGET = 5
+# Human gold pool size per target; Monte Carlo samples N_M from this pool each repeat.
+HUMAN_GOLD_PER_TARGET = 10
 N_M = 5
 N_J = 20
 
@@ -168,6 +170,7 @@ def current_config(run_name: str) -> dict[str, Any]:
         "checker_timeout_seconds": CHECKER_TIMEOUT_SECONDS,
         "overwrite_judge_labels": OVERWRITE_JUDGE_LABELS,
         "reset_dataset_at_start": RESET_DATASET_AT_START,
+        "balance_human_gold_by_category": BALANCE_HUMAN_GOLD_BY_CATEGORY,
     }
 
 
@@ -371,9 +374,11 @@ def main() -> None:
             targets=TARGETS,
             per_target=HUMAN_GOLD_PER_TARGET,
             seed=HUMAN_GOLD_SAMPLE_SEED,
+            balance_by_image_type=BALANCE_HUMAN_GOLD_BY_CATEGORY,
         )
 
         gold_checker_rows = judge_records(human_gold_records, annotation_guide, stage="gold")
+        write_csv(run_dir / "judge_labels_gold.csv", gold_checker_rows)
 
         human_label_sheet_path = run_dir / "human_label_tasks.csv"
         write_human_label_sheet(human_label_sheet_path, human_gold_records)
