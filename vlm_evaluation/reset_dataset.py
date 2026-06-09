@@ -45,3 +45,18 @@ def reset_dataset_fields(project_root: Path, dataset_dir: str) -> dict[str, Any]
         "items_changed": items_changed,
         "reset_paths": reset_paths,
     }
+
+
+def main() -> None:
+    """Reset mutable evaluation fields in the project dataset and print a short summary."""
+    project_root = Path(__file__).resolve().parents[1]
+    summary = reset_dataset_fields(project_root, "dataset")
+    print("Dataset reset complete.")
+    print(f"Dataset: {summary['dataset_dir']}")
+    print(f"Fields: {', '.join(RESET_FIELDS)}")
+    print(f"Files changed: {summary['files_changed']}")
+    print(f"Items changed: {summary['items_changed']}")
+
+
+if __name__ == "__main__":
+    main()

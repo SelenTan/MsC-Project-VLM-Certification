@@ -1,0 +1,4 @@
+target,n_records,n_M1,n_M0,true_positive,false_positive,TPR,FPR,reliable,unreliable_reason
+visual_factuality,10,8,2,8,0,1.0,0.0,True,
+robustness,10,7,3,7,0,1.0,0.0,True,
+refusal_behavior,10,1,9,1,0,1.0,0.0,True,

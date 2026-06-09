@@ -7,7 +7,7 @@ import csv
 import json
 import random
 import shutil
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -27,16 +27,14 @@ def short_model_name(model_name: str) -> str:
 
 
 def default_run_name(target_model_name: str) -> str:
-    return f"{date.today().isoformat()}_{short_model_name(target_model_name)}"
+    return f"{datetime.now().strftime('%Y-%m-%d_%H%M')}_{short_model_name(target_model_name)}"
 
 
 def create_run_dir(project_root: Path, runs_dir: str, run_name: str) -> Path:
     runs_path = project_path(project_root, runs_dir)
     run_dir = runs_path / run_name
-    suffix = 2
-    while run_dir.exists():
-        run_dir = runs_path / f"{run_name}_{suffix}"
-        suffix += 1
+    if run_dir.exists():
+        raise FileExistsError(f"Run directory already exists: {run_dir}")
     run_dir.mkdir(parents=True)
     return run_dir
 
@@ -240,12 +238,6 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8") as file:
-        for row in rows:
-            file.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
@@ -258,27 +250,17 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
-def write_category_csvs(run_dir: Path, rows: list[dict[str, Any]]) -> None:
-    by_category_dir = run_dir / "responses_by_category"
-    categories = sorted({row["image_type"] for row in rows})
-    for category in categories:
-        write_csv(by_category_dir / f"{category}.csv", [row for row in rows if row["image_type"] == category])
-
-
 def copy_dataset_snapshot(project_root: Path, dataset_dir: str, run_dir: Path) -> None:
+    """Archive QA JSON state only; image files are immutable dataset inputs and are not copied."""
     source = project_path(project_root, dataset_dir)
     destination = run_dir / "dataset_snapshot"
     if destination.exists():
         shutil.rmtree(destination)
-    shutil.copytree(source, destination)
-
-
-def copy_named_dataset_snapshot(project_root: Path, dataset_dir: str, run_dir: Path, name: str) -> None:
-    source = project_path(project_root, dataset_dir)
-    destination = run_dir / name
-    if destination.exists():
-        shutil.rmtree(destination)
-    shutil.copytree(source, destination)
+    for qa_path in sorted(source.glob("*/qa/*.json")):
+        relative_path = qa_path.relative_to(source)
+        target_path = destination / relative_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(qa_path, target_path)
 
 
 def add_run_metadata(rows: list[dict[str, Any]], run_name: str, target_model: str, checker_model: str) -> list[dict[str, Any]]:
@@ -363,20 +345,14 @@ def export_run_artifacts(
     certificate_rows: list[dict[str, Any]],
     targets: tuple[str, ...],
 ) -> None:
-    """Persist the completed run in CSV, JSON, JSONL, dataset snapshot, and chart form."""
+    """Persist the completed run in compact CSV, QA snapshot, log, and chart form."""
     write_json(run_dir / "run_config.json", config)
     write_csv(run_dir / "human_gold_pool.csv", add_run_metadata(human_gold_records, run_name, target_model, checker_model))
-    write_jsonl(run_dir / "human_gold_pool.jsonl", human_gold_records)
     write_csv(run_dir / "judge_labels_gold.csv", gold_checker_rows)
     write_csv(run_dir / "judge_labels_evaluation.csv", evaluation_checker_rows)
     write_csv(run_dir / "reliability_by_target.csv", reliability_rows)
     write_csv(run_dir / "monte_carlo_repeats.csv", monte_carlo_rows)
     write_csv(run_dir / "certificate_summary.csv", certificate_rows)
-    write_json(run_dir / "certificate_summary.json", certificate_rows)
 
-    all_records = load_records(project_root, dataset_dir, targets)
-    all_records = add_run_metadata(all_records, run_name, target_model, checker_model)
-    write_csv(run_dir / "all_items.csv", all_records)
-    write_category_csvs(run_dir, all_records)
     copy_dataset_snapshot(project_root, dataset_dir, run_dir)
     make_charts(run_dir, reliability_rows, certificate_rows, monte_carlo_rows)

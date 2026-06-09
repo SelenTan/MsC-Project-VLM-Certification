@@ -1,0 +1,4 @@
+target,reliable_checker,TPR,FPR,gold_n_records,gold_n_M1,gold_n_M0,repeats,certified_repeats,certified_rate,alpha_mean,alpha_median,alpha_min_observed,alpha_max_observed,status
+visual_factuality,True,1.0,0.0,10,8,2,1000,775,0.775,0.6233161290322581,0.63,0.27,0.8,certified_in_some_repeats
+robustness,True,1.0,0.0,10,7,3,1000,870,0.87,0.664080459770115,0.68,0.38,0.8,certified_in_some_repeats
+refusal_behavior,True,1.0,0.0,10,1,9,1000,501,0.501,0.1901796407185629,0.2,0.12,0.33,certified_in_some_repeats
