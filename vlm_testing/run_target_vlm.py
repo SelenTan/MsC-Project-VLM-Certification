@@ -210,7 +210,6 @@ def run_dataset(args: argparse.Namespace) -> int:
 
     for qa_path in iter_qa_paths(dataset_dir, args.categories):
         data = json.loads(qa_path.read_text(encoding="utf-8"))
-        changed = False
 
         for item in ordered_items(data):
             if item.get("target") not in selected_targets:
@@ -242,11 +241,7 @@ def run_dataset(args: argparse.Namespace) -> int:
                 payload=payload,
                 timeout=args.timeout,
             )
-            changed = True
             processed += 1
-            write_json(qa_path, data)
-
-        if changed:
             write_json(qa_path, data)
 
     return processed

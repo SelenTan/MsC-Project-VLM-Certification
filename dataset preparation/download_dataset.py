@@ -8,9 +8,9 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Iterable, List, Optional, Set, Tuple
 
-from datasets import Dataset, IterableDataset, load_dataset
+from datasets import IterableDataset, load_dataset
 from PIL import Image
 from tqdm import tqdm
 
@@ -463,28 +463,6 @@ def safe_stem(text: str) -> str:
     return text.strip("_") or "item"
 
 
-def load_first_available_split(
-    hf_id: str, split_candidates: Tuple[str, ...], seed: int, config_name: Optional[str] = None
-) -> Tuple[str, Union[Dataset, IterableDataset]]:
-    last_error: Optional[Exception] = None
-    for split in split_candidates:
-        try:
-            return split, load_dataset(hf_id, config_name, split=split, streaming=True)
-        except Exception as exc:
-            last_error = exc
-
-    for split in split_candidates:
-        try:
-            dataset = load_dataset(hf_id, config_name, split=split)
-            if hasattr(dataset, "shuffle"):
-                dataset = dataset.shuffle(seed=seed)
-            return split, dataset
-        except Exception as exc:
-            last_error = exc
-
-    raise RuntimeError(f"Could not load any split for {hf_id}") from last_error
-
-
 def iter_available_split_examples(
     config: dict[str, Any], seed: int
 ) -> Iterable[Tuple[str, int, dict[str, Any]]]:
@@ -497,14 +475,7 @@ def iter_available_split_examples(
             loaded_any_split = True
         except Exception as exc:
             last_error = exc
-            try:
-                dataset = load_dataset(config["hf_id"], config.get("config_name"), split=split)
-                if hasattr(dataset, "shuffle"):
-                    dataset = dataset.shuffle(seed=seed)
-                loaded_any_split = True
-            except Exception as fallback_exc:
-                last_error = fallback_exc
-                continue
+            continue
 
         for source_index, example in iter_examples(dataset, seed):
             yield split, source_index, example
@@ -520,9 +491,8 @@ def category_source_configs(category: str) -> List[dict[str, Any]]:
     return configs
 
 
-def iter_examples(dataset: Union[Dataset, IterableDataset], seed: int) -> Iterable[Tuple[int, dict[str, Any]]]:
-    if isinstance(dataset, IterableDataset):
-        dataset = dataset.shuffle(seed=seed, buffer_size=1000)
+def iter_examples(dataset: IterableDataset, seed: int) -> Iterable[Tuple[int, dict[str, Any]]]:
+    dataset = dataset.shuffle(seed=seed, buffer_size=1000)
     for idx, example in enumerate(dataset):
         yield idx, example
 

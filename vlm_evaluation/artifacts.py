@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import random
 import shutil
 from datetime import datetime
@@ -310,8 +311,6 @@ def copy_dataset_snapshot(project_root: Path, dataset_dir: str, run_dir: Path) -
     """Archive QA JSON state only; image files are immutable dataset inputs and are not copied."""
     source = project_path(project_root, dataset_dir)
     destination = run_dir / "dataset_snapshot"
-    if destination.exists():
-        shutil.rmtree(destination)
     for qa_path in sorted(source.glob("*/qa/*.json")):
         relative_path = qa_path.relative_to(source)
         target_path = destination / relative_path
@@ -319,21 +318,24 @@ def copy_dataset_snapshot(project_root: Path, dataset_dir: str, run_dir: Path) -
         shutil.copy2(qa_path, target_path)
 
 
-def add_run_metadata(rows: list[dict[str, Any]], run_name: str, target_model: str, checker_model: str) -> list[dict[str, Any]]:
-    enriched: list[dict[str, Any]] = []
-    for row in rows:
-        new_row = dict(row)
-        new_row.update({"run_name": run_name, "target_model": target_model, "checker_model": checker_model})
-        enriched.append(new_row)
-    return enriched
-
-
 def make_charts(run_dir: Path, reliability_rows: list[dict[str, Any]], certificate_rows: list[dict[str, Any]], monte_carlo_rows: list[dict[str, Any]]) -> None:
     """Create the core certificate charts from saved reliability and Monte Carlo outputs."""
-    import matplotlib.pyplot as plt
-
     charts_dir = run_dir / "charts"
     charts_dir.mkdir(exist_ok=True)
+    matplotlib_cache = Path(os.environ.get("MPLCONFIGDIR", Path(os.environ.get("TMPDIR", "/tmp")) / "matplotlib"))
+    matplotlib_cache.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MPLBACKEND", "Agg")
+    os.environ.setdefault("MPLCONFIGDIR", str(matplotlib_cache))
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Chart generation requires Matplotlib. Install project dependencies with "
+            "'python -m pip install -r requirement.txt'."
+        ) from exc
 
     targets = [row["target"] for row in reliability_rows]
     x_positions = list(range(len(targets)))
@@ -397,24 +399,17 @@ def export_run_artifacts(
     project_root: Path,
     dataset_dir: str,
     run_dir: Path,
-    run_name: str,
-    target_model: str,
-    checker_model: str,
-    config: dict[str, Any],
-    human_gold_records: list[dict[str, Any]],
-    evaluation_checker_rows: list[dict[str, Any]],
     reliability_rows: list[dict[str, Any]],
     monte_carlo_rows: list[dict[str, Any]],
     certificate_rows: list[dict[str, Any]],
-    targets: tuple[str, ...],
 ) -> None:
     """Persist the completed run in compact CSV, QA snapshot, log, and chart form."""
-    write_json(run_dir / "run_config.json", config)
-    write_csv(run_dir / "human_gold_pool.csv", add_run_metadata(human_gold_records, run_name, target_model, checker_model))
-    write_csv(run_dir / "judge_labels_evaluation.csv", evaluation_checker_rows)
-    write_csv(run_dir / "reliability_by_target.csv", reliability_rows)
-    write_csv(run_dir / "monte_carlo_repeats.csv", monte_carlo_rows)
+    print("Writing certificate and Monte Carlo artifacts...", flush=True)
+    if monte_carlo_rows:
+        write_csv(run_dir / "monte_carlo_repeats.csv", monte_carlo_rows)
     write_csv(run_dir / "certificate_summary.csv", certificate_rows)
 
+    print("Copying QA dataset snapshot...", flush=True)
     copy_dataset_snapshot(project_root, dataset_dir, run_dir)
+    print("Generating certificate charts...", flush=True)
     make_charts(run_dir, reliability_rows, certificate_rows, monte_carlo_rows)

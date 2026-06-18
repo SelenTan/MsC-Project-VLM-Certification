@@ -203,6 +203,9 @@ def summarize_certificates(
         target_summary = {
             "target": target,
             "reliable_checker": reliability["reliable"],
+            "unreliable_reason": reliability["unreliable_reason"],
+            "true_positive": reliability["true_positive"],
+            "false_positive": reliability["false_positive"],
             "TPR": reliability["TPR"],
             "FPR": reliability["FPR"],
             "gold_n_records": reliability["n_records"],
@@ -215,7 +218,13 @@ def summarize_certificates(
             "alpha_median": statistics.median(alphas) if alphas else None,
             "alpha_min_observed": min(alphas) if alphas else None,
             "alpha_max_observed": max(alphas) if alphas else None,
-            "status": "certified_in_some_repeats" if alphas else "not_certified",
+            "status": (
+                "checker_unreliable"
+                if not reliability["reliable"]
+                else "certified_in_some_repeats"
+                if alphas
+                else "not_certified"
+            ),
         }
         summary.append(target_summary)
 

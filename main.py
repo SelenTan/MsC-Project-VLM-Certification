@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import traceback
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -356,10 +357,6 @@ def print_human_label_instructions(human_gold_records: list[dict[str, Any]]) -> 
 
 def archive_run_artifacts(
     run_dir: Path,
-    run_name: str,
-    config: dict[str, Any],
-    human_gold_records: list[dict[str, Any]],
-    evaluation_checker_rows: list[dict[str, Any]],
     reliability_rows: list[dict[str, Any]],
     monte_carlo_rows: list[dict[str, Any]],
     certificate_rows: list[dict[str, Any]],
@@ -369,16 +366,9 @@ def archive_run_artifacts(
         project_root=PROJECT_ROOT,
         dataset_dir=DATASET_DIR,
         run_dir=run_dir,
-        run_name=run_name,
-        target_model=TARGET_MODEL_NAME,
-        checker_model=CHECKER_MODEL_NAME,
-        config=config,
-        human_gold_records=human_gold_records,
-        evaluation_checker_rows=evaluation_checker_rows,
         reliability_rows=reliability_rows,
         monte_carlo_rows=monte_carlo_rows,
         certificate_rows=certificate_rows,
-        targets=TARGETS,
     )
 
 
@@ -401,12 +391,13 @@ def main() -> None:
     run_name = run_dir.name
     config = current_config(run_name)
     write_json(run_dir / "run_config.json", config)
-    reset_dataset_at_start()
 
-    require_local_endpoint(CHECKER_INTERNAL_ENDPOINT, ALLOW_NON_LOCAL_CHECKER)
-    target_server = maybe_start_target_server(run_dir)
+    target_server = ManagedServer(process=None, log_path=None)
     checker_server = ManagedServer(process=None, log_path=None)
     try:
+        reset_dataset_at_start()
+        require_local_endpoint(CHECKER_INTERNAL_ENDPOINT, ALLOW_NON_LOCAL_CHECKER)
+        target_server = maybe_start_target_server(run_dir)
         processed_target_items = run_target_responses()
         print(f"Target VLM processed {processed_target_items} item(s).")
         if target_server.started_by_script:
@@ -448,15 +439,12 @@ def main() -> None:
             print("\nChecker unreliable. Exiting before evaluation-pool judging.")
             for row in unreliable:
                 print(f"- {row['target']}: {row['unreliable_reason']}")
+            certificate_rows = summarize_certificates([], reliability_rows, TARGETS)
             archive_run_artifacts(
                 run_dir=run_dir,
-                run_name=run_name,
-                config=config,
-                human_gold_records=human_gold_records,
-                evaluation_checker_rows=[],
                 reliability_rows=reliability_rows,
                 monte_carlo_rows=[],
-                certificate_rows=[],
+                certificate_rows=certificate_rows,
             )
             raise SystemExit(1)
 
@@ -470,10 +458,12 @@ def main() -> None:
             checkpoint_path=evaluation_checkpoint_path,
             persist_to_dataset=True,
         )
-        evaluation_by_key = {record_key(record): record for record in evaluation_records}
-        apply_checker_results(evaluation_by_key, evaluation_checker_rows)
+        print(f"Evaluation checker complete: {len(evaluation_checker_rows)} records.", flush=True)
+        write_csv(run_dir / "judge_labels_evaluation.csv", evaluation_checker_rows)
+        evaluation_checkpoint_path.unlink(missing_ok=True)
         evaluation_records = merge_checker_rows(evaluation_records, evaluation_checker_rows)
 
+        print(f"Running {B} Monte Carlo repeats per target...", flush=True)
         monte_carlo_rows = run_monte_carlo(
             human_gold_records=human_gold_records,
             evaluation_records=evaluation_records,
@@ -487,19 +477,22 @@ def main() -> None:
             alpha_step=ALPHA_STEP,
             seed=MONTE_CARLO_SEED,
         )
+        print(f"Monte Carlo complete: {len(monte_carlo_rows)} rows.", flush=True)
         certificate_rows = summarize_certificates(monte_carlo_rows, reliability_rows, TARGETS)
+        print("Archiving run artifacts...", flush=True)
         archive_run_artifacts(
             run_dir=run_dir,
-            run_name=run_name,
-            config=config,
-            human_gold_records=human_gold_records,
-            evaluation_checker_rows=evaluation_checker_rows,
             reliability_rows=reliability_rows,
             monte_carlo_rows=monte_carlo_rows,
             certificate_rows=certificate_rows,
         )
-        evaluation_checkpoint_path.unlink(missing_ok=True)
         print(f"\nRun complete. Artifacts saved under {run_dir}")
+    except Exception:
+        error_path = run_dir / "logs" / "workflow_error.log"
+        error_path.parent.mkdir(parents=True, exist_ok=True)
+        error_path.write_text(traceback.format_exc(), encoding="utf-8")
+        print(f"Workflow failed. Full traceback saved to {error_path}", file=sys.stderr, flush=True)
+        raise
     finally:
         if checker_server.started_by_script:
             checker_server.stop()

@@ -112,12 +112,27 @@ def endpoint_models_url(endpoint: str) -> str:
     return f"{endpoint_base(endpoint)}/models"
 
 
-def endpoint_available(endpoint: str, timeout: int = 5) -> bool:
+def endpoint_model_ids(endpoint: str, timeout: int = 5) -> Optional[set[str]]:
     try:
         with request.urlopen(endpoint_models_url(endpoint), timeout=timeout) as response:
-            return response.status == 200
-    except (error.URLError, TimeoutError):
-        return False
+            response_data = json.loads(response.read().decode("utf-8"))
+    except (error.URLError, TimeoutError, json.JSONDecodeError):
+        return None
+    if response.status != 200 or not isinstance(response_data, dict):
+        return None
+    models = response_data.get("data")
+    if not isinstance(models, list):
+        return None
+    return {
+        model["id"]
+        for model in models
+        if isinstance(model, dict) and isinstance(model.get("id"), str)
+    }
+
+
+def endpoint_available(endpoint: str, timeout: int = 5, expected_model: Optional[str] = None) -> bool:
+    model_ids = endpoint_model_ids(endpoint, timeout)
+    return model_ids is not None and (expected_model is None or expected_model in model_ids)
 
 
 def parse_host_port(endpoint: str) -> tuple[str, int]:
@@ -127,7 +142,13 @@ def parse_host_port(endpoint: str) -> tuple[str, int]:
     return parsed.hostname, parsed.port
 
 
-def wait_for_endpoint(endpoint: str, process: subprocess.Popen[bytes], timeout_seconds: int, log_path: Path) -> None:
+def wait_for_endpoint(
+    endpoint: str,
+    expected_model: str,
+    process: subprocess.Popen[bytes],
+    timeout_seconds: int,
+    log_path: Path,
+) -> None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         if process.poll() is not None:
@@ -135,7 +156,7 @@ def wait_for_endpoint(endpoint: str, process: subprocess.Popen[bytes], timeout_s
                 f"vLLM server exited before becoming ready. Check log: {log_path}\n\n"
                 f"Last log lines:\n{tail_log(log_path)}"
             )
-        if endpoint_available(endpoint, timeout=5):
+        if endpoint_available(endpoint, timeout=5, expected_model=expected_model):
             return
         time.sleep(5)
     raise ModelServerError(
@@ -166,8 +187,14 @@ def start_vllm_server(
     wait_timeout_seconds: int,
 ) -> ManagedServer:
     """Launch vLLM from scratch if the local internal API is not already ready."""
-    if endpoint_available(endpoint):
+    existing_model_ids = endpoint_model_ids(endpoint)
+    if existing_model_ids is not None and served_model_name in existing_model_ids:
         return ManagedServer(process=None, log_path=None)
+    if existing_model_ids is not None:
+        raise ModelServerError(
+            f"Endpoint {endpoint!r} is already serving {sorted(existing_model_ids)!r}, "
+            f"not required model {served_model_name!r}."
+        )
     if shutil.which("vllm") is None:
         raise ModelServerError(
             "vLLM is not installed in this environment. Install project dependencies on the GPU machine first, "
@@ -200,11 +227,19 @@ def start_vllm_server(
     command.extend(extra_args)
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = log_path.open("ab")
     env = os.environ.copy()
     if cuda_visible_devices:
         env["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
-    process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=env)
-    wait_for_endpoint(endpoint, process, wait_timeout_seconds, log_path)
+    log_file = log_path.open("ab")
+    process: Optional[subprocess.Popen[bytes]] = None
+    try:
+        process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=env)
+        wait_for_endpoint(endpoint, served_model_name, process, wait_timeout_seconds, log_path)
+    except Exception:
+        if process is not None:
+            ManagedServer(process=process, log_path=log_path).stop()
+        raise
+    finally:
+        log_file.close()
     return ManagedServer(process=process, log_path=log_path)

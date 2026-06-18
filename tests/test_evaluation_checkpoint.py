@@ -6,7 +6,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
 
 import main
+import artifacts
+import model_server
+import run_target_vlm
 from ai_checker import CheckerError, build_checker_payload, parse_checker_json
 from artifacts import write_human_label_sheet
 from normalization import normalize_dataset_references, normalize_reference_answer
@@ -24,10 +28,6 @@ class EvaluationCheckpointTest(unittest.TestCase):
         with patch.object(main, "export_run_artifacts") as export_mock:
             main.archive_run_artifacts(
                 run_dir=Path("run"),
-                run_name="run",
-                config={},
-                human_gold_records=[],
-                evaluation_checker_rows=[],
                 reliability_rows=[],
                 monte_carlo_rows=[],
                 certificate_rows=[],
@@ -35,6 +35,154 @@ class EvaluationCheckpointTest(unittest.TestCase):
 
         export_mock.assert_called_once()
         self.assertNotIn("gold_checker_rows", export_mock.call_args.kwargs)
+
+    def test_archive_does_not_recreate_redundant_csv_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            run_dir = project_root / "runs" / "test-run"
+            run_dir.mkdir(parents=True)
+            reliability_rows = [
+                {
+                    "target": "visual_factuality",
+                    "TPR": 1.0,
+                    "FPR": 0.0,
+                    "n_M1": 1,
+                    "n_M0": 1,
+                }
+            ]
+
+            with patch.object(artifacts, "make_charts"):
+                artifacts.export_run_artifacts(
+                    project_root=project_root,
+                    dataset_dir="dataset",
+                    run_dir=run_dir,
+                    reliability_rows=reliability_rows,
+                    monte_carlo_rows=[{"target": "visual_factuality"}],
+                    certificate_rows=[],
+                )
+
+            csv_names = {path.name for path in run_dir.glob("*.csv")}
+            self.assertEqual(
+                csv_names,
+                {"certificate_summary.csv", "monte_carlo_repeats.csv"},
+            )
+
+    def test_archive_omits_monte_carlo_file_when_no_repeats_ran(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            run_dir = project_root / "runs" / "test-run"
+            run_dir.mkdir(parents=True)
+
+            with patch.object(artifacts, "make_charts"):
+                artifacts.export_run_artifacts(
+                    project_root=project_root,
+                    dataset_dir="dataset",
+                    run_dir=run_dir,
+                    reliability_rows=[],
+                    monte_carlo_rows=[],
+                    certificate_rows=[],
+                )
+
+            self.assertFalse((run_dir / "monte_carlo_repeats.csv").exists())
+
+    def test_target_response_is_checkpointed_once_per_item(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dataset_dir = Path(temp_dir)
+            qa_dir = dataset_dir / "charts" / "qa"
+            image_dir = dataset_dir / "charts" / "images"
+            qa_dir.mkdir(parents=True)
+            image_dir.mkdir(parents=True)
+            image_path = image_dir / "sample.jpg"
+            image_path.write_bytes(b"image")
+            qa_path = qa_dir / "sample.json"
+            qa_path.write_text(
+                json.dumps(
+                    {
+                        "image_path": str(image_path),
+                        "items": [
+                            {
+                                "item_id": "item-1",
+                                "target": "visual_factuality",
+                                "prompt": "What is shown?",
+                                "target_model_response": None,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                dataset_dir=str(dataset_dir),
+                port=8000,
+                api_key_env="UNSET_TEST_KEY",
+                categories=None,
+                targets=("visual_factuality",),
+                limit=None,
+                model="test-model",
+                max_tokens=10,
+                temperature=0.0,
+                timeout=1,
+                overwrite=False,
+                dry_run=False,
+            )
+
+            real_write_json = run_target_vlm.write_json
+            with (
+                patch.object(run_target_vlm, "build_payload", return_value={}),
+                patch.object(run_target_vlm, "call_vlm", return_value="answer"),
+                patch.object(run_target_vlm, "write_json", wraps=real_write_json) as write_mock,
+            ):
+                processed = run_target_vlm.run_dataset(args)
+
+            self.assertEqual(processed, 1)
+            self.assertEqual(write_mock.call_count, 1)
+
+    def test_server_rejects_an_existing_endpoint_with_the_wrong_model(self) -> None:
+        with patch.object(model_server, "endpoint_model_ids", return_value={"wrong-model"}):
+            with self.assertRaisesRegex(model_server.ModelServerError, "not required model"):
+                model_server.start_vllm_server(
+                    endpoint="http://localhost:8000/v1/chat/completions",
+                    model="required-model",
+                    served_model_name="required-model",
+                    log_path=Path("unused.log"),
+                    cuda_visible_devices="0",
+                    tensor_parallel_size=1,
+                    max_model_len=None,
+                    gpu_memory_utilization=None,
+                    limit_mm_per_prompt=None,
+                    mm_encoder_tp_mode=None,
+                    extra_args=(),
+                    wait_timeout_seconds=1,
+                )
+
+    def test_server_process_is_stopped_when_startup_fails(self) -> None:
+        process = MagicMock()
+        process.poll.return_value = None
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(model_server, "endpoint_model_ids", return_value=None),
+                patch.object(model_server.shutil, "which", return_value="/bin/vllm"),
+                patch.object(model_server.subprocess, "Popen", return_value=process),
+                patch.object(model_server, "wait_for_endpoint", side_effect=RuntimeError("startup failed")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "startup failed"):
+                    model_server.start_vllm_server(
+                        endpoint="http://localhost:8000/v1/chat/completions",
+                        model="required-model",
+                        served_model_name="required-model",
+                        log_path=Path(temp_dir) / "server.log",
+                        cuda_visible_devices="0",
+                        tensor_parallel_size=1,
+                        max_model_len=None,
+                        gpu_memory_utilization=None,
+                        limit_mm_per_prompt=None,
+                        mm_encoder_tp_mode=None,
+                        extra_args=(),
+                        wait_timeout_seconds=1,
+                    )
+
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=30)
 
     def test_malformed_json_is_reported_as_checker_error(self) -> None:
         with self.assertRaisesRegex(CheckerError, "valid JSON"):
