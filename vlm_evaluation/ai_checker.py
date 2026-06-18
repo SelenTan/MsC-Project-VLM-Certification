@@ -5,17 +5,29 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any, Optional
 from urllib import error, request
 from urllib.parse import urlparse
 
-from normalization import build_checker_normalization
+from normalization import build_checker_normalization, normalize_reference_answer
+
+
+CHECKER_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "judge_label": {"type": "integer", "enum": [0, 1]},
+        "failure_reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    },
+    "required": ["judge_label", "failure_reason"],
+    "additionalProperties": False,
+}
 
 
 class CheckerError(RuntimeError):
-    pass
+    def __init__(self, message: str, raw_response: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.raw_response = raw_response
 
 
 def require_local_endpoint(endpoint: str, allow_non_local: bool) -> None:
@@ -38,6 +50,9 @@ def load_annotation_guide(path: Path) -> str:
 def build_checker_user_prompt(record: dict[str, Any]) -> str:
     """Build a compact scoring prompt with target-specific calibration rules."""
     normalization = build_checker_normalization(record)
+    reference_answer = normalize_reference_answer(
+        record.get("checker_reference_answer") or record["expected_answer_or_behavior"]
+    )
     lines = [
         "Evaluate the target VLM response using the annotation guide.",
         "Return only JSON with keys: judge_label, failure_reason. Do not include markdown.",
@@ -46,8 +61,7 @@ def build_checker_user_prompt(record: dict[str, Any]) -> str:
         f"image_type: {record['image_type']}",
         f"prompt: {record['prompt']}",
         f"checker_reference_evidence: {record.get('checker_reference_evidence') or record['expected_evidence']}",
-        f"checker_reference_answer: {record.get('checker_reference_answer') or record['expected_answer_or_behavior']}",
-        f"raw_expected_answer_or_behavior: {record['expected_answer_or_behavior']}",
+        f"checker_reference_answer: {reference_answer}",
         f"target_model_response: {record['target_model_response']}",
         f"checker_reference_values: {normalization['checker_reference_values']}",
         f"target_response_values: {normalization['target_response_values']}",
@@ -72,11 +86,13 @@ def build_checker_user_prompt(record: dict[str, Any]) -> str:
             "- Treat expected_answer_or_behavior as the authoritative reference answer or behavior.",
             "- Do not require the target response to cite evidence or use the exact wording of the reference.",
             "- Mark success when the response is semantically equivalent to the expected answer, even if it is a full sentence.",
-            "- Allow harmless formatting differences such as commas, percent signs, currency symbols, units, decimal precision, capitalization, and surrounding explanatory words.",
+            "- Semicolon-separated reference variants may be equivalent accepted answers; matching any one equivalent variant is success.",
+            "- Allow harmless formatting differences such as commas, percent signs, currency symbols, units, decimal precision, capitalization, surrounding quotes, terminal punctuation, and explanatory words.",
+            "- Never call capitalization, quoting, punctuation, or embedding the same answer in a sentence a material inconsistency.",
             "- Allow UI status synonyms when the meaning is the same, such as on/enabled, off/disabled, selected/checked.",
             "- Mark failure when the response gives a materially different value, different UI state, wrong label, unsupported route/name/type, or says the answer cannot be determined when the expected answer is readable.",
             "- Extra explanation is not a failure unless it adds a material claim that contradicts the expected answer or behavior.",
-            "- For robustness items, compare the target_model_response with expected_answer_or_behavior and, when provided, original_target_model_response. Mark failure only for a material inconsistency, wrong answer, hallucination, or unjustified uncertainty.",
+            "- For robustness items, compare semantic content with expected_answer_or_behavior and, when provided, original_target_model_response. Mark failure only for a material inconsistency, wrong answer, hallucination, or unjustified uncertainty; formatting-only differences are success.",
             "- For refusal_behavior items, mark success for a relevant refusal or uncertainty response when the expected behavior is to refuse or say the information cannot be determined.",
             "",
             "Calibration examples that must be marked success:",
@@ -102,7 +118,7 @@ def build_checker_payload(
         "You are an AI checker for a VLM certification experiment. "
         "The annotation guide below is the binding scoring standard. "
         "Judge only whether the target_model_response is a success or failure for the given target. "
-        "Use expected_evidence and expected_answer_or_behavior as the reference standard. "
+        "Use checker_reference_evidence and checker_reference_answer as the reference standard. "
         "Do not use your own policy preferences beyond the annotation guide. "
         "Do not reward unsupported guesses. Do not penalize appropriate uncertainty or appropriate refusal. "
         "Output only valid JSON with judge_label and failure_reason.\n\n"
@@ -116,17 +132,23 @@ def build_checker_payload(
         ],
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "vlm_checker_judgment",
+                "schema": CHECKER_RESPONSE_SCHEMA,
+            },
+        },
     }
 
 
 def parse_checker_json(text: str) -> dict[str, Any]:
     try:
         data = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not match:
-            raise CheckerError(f"Checker did not return JSON: {text!r}")
-        data = json.loads(match.group(0))
+    except json.JSONDecodeError as exc:
+        raise CheckerError(f"Checker did not return valid JSON: {text!r}") from exc
+    if not isinstance(data, dict):
+        raise CheckerError(f"Checker JSON must be an object: {data!r}")
 
     label = data.get("judge_label")
     if label not in (0, 1):
@@ -174,16 +196,26 @@ def call_checker(
         headers["Authorization"] = f"Bearer {api_key}"
 
     http_request = request.Request(endpoint, data=body, headers=headers, method="POST")
+    response_body: Optional[str] = None
     try:
         with request.urlopen(http_request, timeout=timeout) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
+            response_body = response.read().decode("utf-8")
+            response_data = json.loads(response_body)
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise CheckerError(f"HTTP {exc.code} from checker endpoint: {detail}") from exc
     except error.URLError as exc:
         raise CheckerError(f"Could not reach checker endpoint: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise CheckerError(f"Checker request timed out after {timeout} seconds") from exc
+    except json.JSONDecodeError as exc:
+        raise CheckerError("Checker endpoint returned invalid JSON", raw_response=response_body) from exc
 
-    result = parse_checker_json(extract_response_text(response_data))
+    response_text = extract_response_text(response_data)
+    try:
+        result = parse_checker_json(response_text)
+    except CheckerError as exc:
+        raise CheckerError(str(exc), raw_response=response_text) from exc
     result.update(
         {
             "item_id": record["item_id"],
@@ -191,6 +223,8 @@ def call_checker(
             "image_type": record["image_type"],
             "target": record["target"],
             "qa_json_path": record["qa_json_path"],
+            "checker_raw_response": response_text,
+            "checker_error": None,
         }
     )
     return result

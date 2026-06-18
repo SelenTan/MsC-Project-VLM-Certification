@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 
@@ -28,10 +30,19 @@ def unique_preserve_order(values: list[str]) -> list[str]:
     result: list[str] = []
     for value in values:
         normalized = " ".join(str(value).split())
-        if normalized and normalized not in seen:
-            seen.add(normalized)
+        equivalence_key = normalized.casefold().strip(" \t\r\n\"'`.,;:!?()[]{}")
+        if normalized and equivalence_key not in seen:
+            seen.add(equivalence_key)
             result.append(normalized)
     return result
+
+
+def deduplicate_semicolon_variants(text: str) -> str:
+    variants = [part.strip() for part in text.split(";")]
+    if len(variants) < 2 or any(not variant for variant in variants):
+        return text
+    unique_variants = unique_preserve_order(variants)
+    return "; ".join(unique_variants)
 
 
 def normalize_reference_answer(value: Any) -> str:
@@ -69,7 +80,7 @@ def normalize_reference_answer(value: Any) -> str:
         if parsed.get("full_answer") is not None:
             return str(parsed["full_answer"])
         return json.dumps(parsed, ensure_ascii=False, sort_keys=True)
-    return " ".join(str(value).split())
+    return deduplicate_semicolon_variants(" ".join(str(value).split()))
 
 
 def normalize_reference_evidence(value: Any) -> str:
@@ -156,3 +167,52 @@ def build_checker_normalization(record: dict[str, Any]) -> dict[str, Any]:
         "target_response_values": response_values,
         "normalization_hint": hint,
     }
+
+
+def normalize_dataset_references(project_root: Path, dataset_dir: str = "dataset") -> dict[str, Any]:
+    """Write normalized checker reference fields into every QA item in one dataset."""
+    dataset_path = project_root / dataset_dir
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Dataset directory not found: {dataset_path}")
+
+    files_changed = 0
+    items_changed = 0
+    for qa_path in sorted(dataset_path.glob("*/qa/*.json")):
+        data = json.loads(qa_path.read_text(encoding="utf-8"))
+        changed = False
+        for item in data.get("items", []):
+            fields = build_checker_reference_fields(item)
+            if any(item.get(key) != value for key, value in fields.items()):
+                item.update(fields)
+                changed = True
+                items_changed += 1
+        if changed:
+            qa_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            files_changed += 1
+
+    return {
+        "dataset_dir": str(dataset_path),
+        "files_changed": files_changed,
+        "items_changed": items_changed,
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Normalize checker reference fields in QA JSON files.")
+    parser.add_argument("--dataset-dir", default="dataset", help="Dataset directory relative to the project root.")
+    return parser.parse_args()
+
+
+def main() -> None:
+    """Normalize the requested project dataset in place and print a short summary."""
+    args = parse_args()
+    project_root = Path(__file__).resolve().parents[1]
+    summary = normalize_dataset_references(project_root, args.dataset_dir)
+    print("Dataset checker references normalized.")
+    print(f"Dataset: {summary['dataset_dir']}")
+    print(f"Files changed: {summary['files_changed']}")
+    print(f"Items changed: {summary['items_changed']}")
+
+
+if __name__ == "__main__":
+    main()

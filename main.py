@@ -12,8 +12,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
 sys.path.insert(0, str(PROJECT_ROOT / "vlm_testing"))
 
-from ai_checker import call_checker, load_annotation_guide, require_local_endpoint
+from ai_checker import CheckerError, call_checker, load_annotation_guide, require_local_endpoint
 from artifacts import (
+    append_jsonl,
     apply_checker_results,
     apply_human_label_sheet,
     create_run_dir,
@@ -45,7 +46,7 @@ RUN_NAME = None
 RUN_TARGET_VLM_FIRST = True
 TARGET_CATEGORIES = None
 TARGET_CUDA_VISIBLE_DEVICES = None
-TARGET_GPU_MEMORY_UTILIZATION = 0.75
+TARGET_GPU_MEMORY_UTILIZATION = 0.7
 TARGET_LIMIT = None
 TARGET_LIMIT_MM_PER_PROMPT = '{"image":2,"video":0}'
 TARGET_MAX_GPUS = 2
@@ -72,7 +73,7 @@ ALLOW_NON_LOCAL_CHECKER = False
 AUTO_DEPLOY_CHECKER = True
 CHECKER_API_KEY_ENV = "LOCAL_CHECKER_API_KEY"
 CHECKER_CUDA_VISIBLE_DEVICES = None
-CHECKER_GPU_MEMORY_UTILIZATION = 0.90
+CHECKER_GPU_MEMORY_UTILIZATION = 0.7
 CHECKER_LIMIT_MM_PER_PROMPT = None
 CHECKER_MAX_MODEL_LEN = 8192
 CHECKER_MIN_FREE_MEMORY_MB = 20000
@@ -89,9 +90,9 @@ CHECKER_VLLM_EXTRA_ARGS: tuple[str, ...] = ()
 BALANCE_HUMAN_GOLD_BY_CATEGORY = True
 TARGETS = ("visual_factuality", "robustness", "refusal_behavior")
 # Human gold pool size per target; Monte Carlo samples N_M from this pool each repeat.
-HUMAN_GOLD_PER_TARGET = 30
-N_M = 15
-N_J = 120
+HUMAN_GOLD_PER_TARGET = 50
+N_M = 25
+N_J = 500
 
 # Random seeds
 HUMAN_GOLD_SAMPLE_SEED = 42
@@ -265,39 +266,80 @@ def maybe_start_checker_server(run_dir: Path) -> ManagedServer:
     )
 
 
-def judge_records(records: list[dict[str, Any]], annotation_guide: str, stage: str) -> list[dict[str, Any]]:
-    """Call the local checker for selected records and attach stable run metadata to each result."""
+def judge_records(
+    records: list[dict[str, Any]],
+    annotation_guide: str,
+    stage: str,
+    checkpoint_path: Path | None = None,
+    persist_to_dataset: bool = False,
+) -> list[dict[str, Any]]:
+    """Call the checker, optionally checkpoint each result, and persist current-run evaluation labels."""
     rows: list[dict[str, Any]] = []
     for index, record in enumerate(records, start=1):
-        if record.get("judge_label") is not None and not OVERWRITE_JUDGE_LABELS:
-            rows.append(
-                {
-                    "record_key": record_key(record),
-                    "stage": stage,
-                    "item_id": record["item_id"],
-                    "image_id": record["image_id"],
-                    "image_type": record["image_type"],
-                    "target": record["target"],
-                    "qa_json_path": record["qa_json_path"],
-                    "judge_label": record["judge_label"],
-                    "judge_failure_reason": record.get("failure_reason"),
-                }
-            )
+        reuse_existing_label = (
+            not persist_to_dataset
+            and record.get("judge_label") is not None
+            and not OVERWRITE_JUDGE_LABELS
+        )
+        if reuse_existing_label:
+            result = {
+                "record_key": record_key(record),
+                "stage": stage,
+                "item_id": record["item_id"],
+                "image_id": record["image_id"],
+                "image_type": record["image_type"],
+                "target": record["target"],
+                "qa_json_path": record["qa_json_path"],
+                "judge_label": record["judge_label"],
+                "judge_failure_reason": record.get("failure_reason"),
+                "checker_raw_response": None,
+                "checker_error": None,
+            }
+            rows.append(result)
+            if checkpoint_path is not None:
+                append_jsonl(checkpoint_path, result)
             continue
         print(f"Checker {stage} {index}/{len(records)}: {record['item_id']} [{record['target']}]")
-        result = call_checker(
-            endpoint=CHECKER_INTERNAL_ENDPOINT,
-            model=CHECKER_MODEL_NAME,
-            annotation_guide=annotation_guide,
-            record=record,
-            max_tokens=CHECKER_MAX_TOKENS,
-            temperature=CHECKER_TEMPERATURE,
-            timeout=CHECKER_TIMEOUT_SECONDS,
-            api_key_env=CHECKER_API_KEY_ENV,
-        )
+        try:
+            result = call_checker(
+                endpoint=CHECKER_INTERNAL_ENDPOINT,
+                model=CHECKER_MODEL_NAME,
+                annotation_guide=annotation_guide,
+                record=record,
+                max_tokens=CHECKER_MAX_TOKENS,
+                temperature=CHECKER_TEMPERATURE,
+                timeout=CHECKER_TIMEOUT_SECONDS,
+                api_key_env=CHECKER_API_KEY_ENV,
+            )
+        except CheckerError as exc:
+            failure_row = {
+                "record_key": record_key(record),
+                "stage": stage,
+                "item_id": record["item_id"],
+                "image_id": record["image_id"],
+                "image_type": record["image_type"],
+                "target": record["target"],
+                "qa_json_path": record["qa_json_path"],
+                "judge_label": None,
+                "judge_failure_reason": None,
+                "checker_raw_response": exc.raw_response,
+                "checker_error": str(exc),
+            }
+            if checkpoint_path is not None:
+                append_jsonl(checkpoint_path, failure_row)
+            raise CheckerError(
+                f"Checker failed for {record['item_id']} during {stage}: {exc}",
+                raw_response=exc.raw_response,
+            ) from exc
         result["record_key"] = record_key(record)
         result["stage"] = stage
         rows.append(result)
+        if persist_to_dataset:
+            apply_checker_results({record_key(record): record}, [result])
+            record["judge_label"] = result["judge_label"]
+            record["failure_reason"] = result["judge_failure_reason"]
+        if checkpoint_path is not None:
+            append_jsonl(checkpoint_path, result)
     return rows
 
 
@@ -317,7 +359,6 @@ def archive_run_artifacts(
     run_name: str,
     config: dict[str, Any],
     human_gold_records: list[dict[str, Any]],
-    gold_checker_rows: list[dict[str, Any]],
     evaluation_checker_rows: list[dict[str, Any]],
     reliability_rows: list[dict[str, Any]],
     monte_carlo_rows: list[dict[str, Any]],
@@ -333,7 +374,6 @@ def archive_run_artifacts(
         checker_model=CHECKER_MODEL_NAME,
         config=config,
         human_gold_records=human_gold_records,
-        gold_checker_rows=gold_checker_rows,
         evaluation_checker_rows=evaluation_checker_rows,
         reliability_rows=reliability_rows,
         monte_carlo_rows=monte_carlo_rows,
@@ -413,7 +453,6 @@ def main() -> None:
                 run_name=run_name,
                 config=config,
                 human_gold_records=human_gold_records,
-                gold_checker_rows=gold_checker_rows,
                 evaluation_checker_rows=[],
                 reliability_rows=reliability_rows,
                 monte_carlo_rows=[],
@@ -423,7 +462,14 @@ def main() -> None:
 
         gold_keys = {record_key(record) for record in human_gold_records}
         evaluation_records = [record for record in records if record_key(record) not in gold_keys]
-        evaluation_checker_rows = judge_records(evaluation_records, annotation_guide, stage="evaluation")
+        evaluation_checkpoint_path = run_dir / "judge_labels_evaluation_checkpoint.jsonl"
+        evaluation_checker_rows = judge_records(
+            evaluation_records,
+            annotation_guide,
+            stage="evaluation",
+            checkpoint_path=evaluation_checkpoint_path,
+            persist_to_dataset=True,
+        )
         evaluation_by_key = {record_key(record): record for record in evaluation_records}
         apply_checker_results(evaluation_by_key, evaluation_checker_rows)
         evaluation_records = merge_checker_rows(evaluation_records, evaluation_checker_rows)
@@ -447,12 +493,12 @@ def main() -> None:
             run_name=run_name,
             config=config,
             human_gold_records=human_gold_records,
-            gold_checker_rows=gold_checker_rows,
             evaluation_checker_rows=evaluation_checker_rows,
             reliability_rows=reliability_rows,
             monte_carlo_rows=monte_carlo_rows,
             certificate_rows=certificate_rows,
         )
+        evaluation_checkpoint_path.unlink(missing_ok=True)
         print(f"\nRun complete. Artifacts saved under {run_dir}")
     finally:
         if checker_server.started_by_script:
