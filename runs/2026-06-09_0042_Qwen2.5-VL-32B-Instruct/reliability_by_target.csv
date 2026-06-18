@@ -1,4 +1,0 @@
-target,n_records,n_M1,n_M0,true_positive,false_positive,TPR,FPR,reliable,unreliable_reason
-visual_factuality,5,3,2,3,2,1.0,1.0,False,Checker is unreliable for this target because TPR <= FPR.
-robustness,5,4,1,4,0,1.0,0.0,True,
-refusal_behavior,5,1,4,1,0,1.0,0.0,True,

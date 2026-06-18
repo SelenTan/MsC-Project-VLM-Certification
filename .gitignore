@@ -1,5 +1,6 @@
 .DS_Store
 /dataset
+/Medium Dataset
 /Large Dataset
 /.venv
 __pycache__/
