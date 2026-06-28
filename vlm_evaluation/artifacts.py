@@ -272,18 +272,6 @@ def validate_human_labels(records: list[dict[str, Any]]) -> list[dict[str, Any]]
     return updated
 
 
-def merge_checker_rows(records: list[dict[str, Any]], checker_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    checker_by_key = {row["record_key"]: row for row in checker_rows}
-    merged: list[dict[str, Any]] = []
-    for record in records:
-        row = checker_by_key[record_key(record)]
-        new_record = dict(record)
-        new_record["judge_label"] = row["judge_label"]
-        new_record["judge_failure_reason"] = row["judge_failure_reason"]
-        merged.append(new_record)
-    return merged
-
-
 def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

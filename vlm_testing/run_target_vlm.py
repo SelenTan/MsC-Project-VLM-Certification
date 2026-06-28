@@ -16,6 +16,7 @@ from urllib import error, request
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
+from artifacts import record_key, update_item_fields  # noqa: E402
 from dataset_selection import select_dataset_dir  # noqa: E402
 from model_server import ManagedServer, auto_select_gpus, start_vllm_server  # noqa: E402
 
@@ -68,6 +69,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, default=None, help="Optional maximum number of items to run.")
     parser.add_argument("--max-tokens", type=int, default=160, help="Maximum response tokens.")
+    parser.add_argument("--progress-interval", type=int, default=25, help="Print target progress every N records.")
     parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature.")
     parser.add_argument("--timeout", type=int, default=180, help="HTTP request timeout in seconds.")
     parser.add_argument("--overwrite", action="store_true", help="Regenerate existing target_model_response values.")
@@ -175,6 +177,7 @@ def call_vlm(
     payload: dict[str, Any],
     timeout: int,
 ) -> str:
+    """Send one OpenAI-compatible chat request and normalize the model response text."""
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if api_key:
@@ -247,7 +250,120 @@ def run_dataset(args: argparse.Namespace) -> int:
     return processed
 
 
+def run_records(
+    args: argparse.Namespace,
+    records: list[dict[str, Any]],
+    completed_rows: dict[str, dict[str, Any]],
+    append_result,
+) -> int:
+    """Process selected records, reusing checkpointed responses and saving each new response immediately."""
+    endpoint = internal_endpoint(args.port)
+    api_key = os.environ.get(args.api_key_env)
+    progress_interval = max(1, getattr(args, "progress_interval", 25))
+    processed = 0
+
+    for index, record in enumerate(records, start=1):
+        key = record_key(record)
+        if key in completed_rows:
+            update_item_fields(
+                record,
+                {"target_model_response": completed_rows[key]["target_model_response"]},
+            )
+            continue
+        if record.get("target_model_response") and not args.overwrite:
+            append_result(
+                {
+                    "record_key": key,
+                    "item_id": record["item_id"],
+                    "image_id": record["image_id"],
+                    "image_type": record["image_type"],
+                    "target": record["target"],
+                    "qa_json_path": record["qa_json_path"],
+                    "target_model_response": record["target_model_response"],
+                    "target_error": None,
+                    "reused_existing_response": True,
+                }
+            )
+            completed_rows[key] = {"target_model_response": record["target_model_response"]}
+            continue
+
+        image_path = item_image_path(
+            {"image_path": record["image_path"]},
+            {
+                "target": record["target"],
+                "image_path": record["image_path"],
+                "variant_image_paths": json.loads(record.get("variant_image_paths") or "[]"),
+            },
+        )
+        if not image_path.exists():
+            failure_row = {
+                "record_key": key,
+                "item_id": record["item_id"],
+                "image_id": record["image_id"],
+                "image_type": record["image_type"],
+                "target": record["target"],
+                "qa_json_path": record["qa_json_path"],
+                "target_model_response": None,
+                "target_error": f"Image not found: {image_path}",
+            }
+            append_result(failure_row)
+            raise FileNotFoundError(f"Image not found for {record.get('item_id')}: {image_path}")
+
+        if index == 1 or index == len(records) or index % progress_interval == 0:
+            print(f"Target {index}/{len(records)}: {record.get('item_id')} [{record.get('target')}] <- {image_path}")
+        if args.dry_run:
+            processed += 1
+            continue
+
+        try:
+            response_text = call_vlm(
+                endpoint=endpoint,
+                api_key=api_key,
+                payload=build_payload(
+                    model=args.model,
+                    item={"prompt": record["prompt"]},
+                    image_path=image_path,
+                    max_tokens=args.max_tokens,
+                    temperature=args.temperature,
+                ),
+                timeout=args.timeout,
+            )
+        except VLMRequestError as exc:
+            append_result(
+                {
+                    "record_key": key,
+                    "item_id": record["item_id"],
+                    "image_id": record["image_id"],
+                    "image_type": record["image_type"],
+                    "target": record["target"],
+                    "qa_json_path": record["qa_json_path"],
+                    "target_model_response": None,
+                    "target_error": str(exc),
+                }
+            )
+            raise
+
+        update_item_fields(record, {"target_model_response": response_text})
+        row = {
+            "record_key": key,
+            "item_id": record["item_id"],
+            "image_id": record["image_id"],
+            "image_type": record["image_type"],
+            "target": record["target"],
+            "qa_json_path": record["qa_json_path"],
+            "target_model_response": response_text,
+            "target_error": None,
+            "reused_existing_response": False,
+        }
+        append_result(row)
+        completed_rows[key] = row
+        processed += 1
+
+    return processed
+
+
 def maybe_start_target_server(args: argparse.Namespace) -> ManagedServer:
+    """Start a standalone target VLM server for direct CLI runs of this script."""
     if not args.auto_deploy or args.dry_run:
         return ManagedServer(process=None, log_path=None)
     cuda_visible_devices = args.cuda_visible_devices

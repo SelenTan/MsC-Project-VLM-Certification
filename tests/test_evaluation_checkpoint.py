@@ -18,6 +18,7 @@ import main
 import artifacts
 import model_server
 import run_target_vlm
+import workflow_state
 from ai_checker import CheckerError, build_checker_payload, parse_checker_json
 from artifacts import write_human_label_sheet
 from normalization import normalize_dataset_references, normalize_reference_answer
@@ -361,6 +362,83 @@ class EvaluationCheckpointTest(unittest.TestCase):
             self.assertEqual(len(checkpoint_rows), 2)
             self.assertEqual(checkpoint_rows[-1]["checker_raw_response"], "not-json")
             self.assertEqual(checkpoint_rows[-1]["checker_error"], "invalid JSON")
+
+    def test_manifest_keeps_one_qa_file_in_the_same_chunk(self) -> None:
+        records = [
+            {
+                **self.make_record(Path("a.json"), index, f"item-a-{index}"),
+                "qa_json_path": "dataset/charts/qa/a.json",
+                "item_index": index,
+            }
+            for index in range(3)
+        ]
+        records.extend(
+            {
+                **self.make_record(Path("b.json"), index, f"item-b-{index}"),
+                "qa_json_path": "dataset/charts/qa/b.json",
+                "item_index": index,
+            }
+            for index in range(3)
+        )
+
+        manifest_rows = workflow_state.group_records_for_chunks(records, chunk_size=4)
+
+        chunks_by_path: dict[str, set[int]] = {}
+        for row in manifest_rows:
+            chunks_by_path.setdefault(row["qa_json_path"], set()).add(row["chunk_index"])
+        self.assertEqual(chunks_by_path["dataset/charts/qa/a.json"], {0})
+        self.assertEqual(chunks_by_path["dataset/charts/qa/b.json"], {1})
+
+    def test_chunk_selection_accepts_ranges_and_rejects_unknown_chunks(self) -> None:
+        selected = workflow_state.parse_chunk_selection("0, 2-4", available_chunks=range(6))
+
+        self.assertEqual(selected, [0, 2, 3, 4])
+        with self.assertRaisesRegex(ValueError, "not in manifest"):
+            workflow_state.parse_chunk_selection("0,9", available_chunks=range(3))
+
+    def test_collect_chunk_results_reports_missing_and_conflicting_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir)
+            manifest_rows = [
+                {"record_key": "key-1", "chunk_index": 0},
+                {"record_key": "key-2", "chunk_index": 0},
+            ]
+            workflow_state.append_target_row(
+                workflow_state.target_results_path(run_dir, 0),
+                {
+                    "record_key": "key-1",
+                    "target_model_response": "answer",
+                    "target_error": None,
+                },
+            )
+
+            collected = workflow_state.collect_chunk_results(
+                run_dir,
+                manifest_rows,
+                workflow_state.TARGET_RESULTS_FILE,
+                value_field="target_model_response",
+                error_field="target_error",
+            )
+
+            self.assertEqual(set(collected), {"key-1"})
+            self.assertEqual(workflow_state.missing_keys(manifest_rows, collected), ["key-2"])
+
+            workflow_state.append_target_row(
+                workflow_state.target_results_path(run_dir, 0),
+                {
+                    "record_key": "key-1",
+                    "target_model_response": "different answer",
+                    "target_error": None,
+                },
+            )
+            with self.assertRaisesRegex(ValueError, "Conflicting"):
+                workflow_state.collect_chunk_results(
+                    run_dir,
+                    manifest_rows,
+                    workflow_state.TARGET_RESULTS_FILE,
+                    value_field="target_model_response",
+                    error_field="target_error",
+                )
 
 
 if __name__ == "__main__":

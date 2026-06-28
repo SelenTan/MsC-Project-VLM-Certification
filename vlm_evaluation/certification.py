@@ -80,6 +80,7 @@ def certification_threshold(
 ) -> float:
     z_zeta = NormalDist().inv_cdf(zeta)
     alpha_prime = fpr + (tpr - fpr) * alpha
+    # Type I error control calculation from the Noisy but Valid variance-corrected threshold.
     variance = (
         alpha_prime * (1 - alpha_prime) / n_j
         + alpha**2 * tpr * (1 - tpr) / n_m1
@@ -122,6 +123,7 @@ def certifiable_alpha(
             fpr=reliability["FPR"],
         )
         last_threshold = threshold
+        # Reject H0 and certify when the observed judge failure rate is below the controlled threshold.
         if r_j_hat < threshold:
             return {
                 "status": "certified",
