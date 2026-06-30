@@ -240,7 +240,7 @@ class EvaluationCheckpointTest(unittest.TestCase):
     def test_dataset_normalization_preserves_run_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)
-            qa_dir = project_root / "Medium Dataset" / "documents" / "qa"
+            qa_dir = project_root / "Large Dataset" / "documents" / "qa"
             qa_dir.mkdir(parents=True)
             qa_path = qa_dir / "sample.json"
             qa_path.write_text(
@@ -263,7 +263,7 @@ class EvaluationCheckpointTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            summary = normalize_dataset_references(project_root, "Medium Dataset")
+            summary = normalize_dataset_references(project_root, "Large Dataset")
 
             item = json.loads(qa_path.read_text(encoding="utf-8"))["items"][0]
             self.assertEqual(summary["files_changed"], 1)
@@ -456,7 +456,7 @@ class EvaluationCheckpointTest(unittest.TestCase):
             manifest_rows = [{"record_key": "key-1", "chunk_index": 0}]
 
             workflow_state.write_manifest(run_dir, manifest_rows)
-            workflow_state.write_run_status(run_dir, "created", dataset_dir="Medium Dataset")
+            workflow_state.write_run_status(run_dir, "created", dataset_dir="Large Dataset")
             workflow_state.write_human_gold_keys(run_dir, ["key-1"])
             workflow_state.save_local_chunks(run_dir, [0])
 
@@ -477,7 +477,7 @@ class EvaluationCheckpointTest(unittest.TestCase):
             + [{"target": "refusal_behavior"} for _ in range(70)]
         )
 
-        self.assertEqual(main.effective_n_j("Medium Dataset", records), 50)
+        self.assertEqual(main.effective_n_j(records), 50)
 
     def test_progress_summary_reports_chunk_stage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

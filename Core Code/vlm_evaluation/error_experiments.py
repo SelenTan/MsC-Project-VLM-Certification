@@ -401,11 +401,13 @@ def make_error_experiment_charts(
                     label=METHOD_LABELS[method],
                     linewidth=1.6,
                 )
-            if metric == "type_i_error":
-                axis.axhline(0.05, color="black", linestyle=":", linewidth=1.0, label="zeta=0.05")
             axis.set_title(target)
             axis.set_xlabel("alpha")
-            axis.set_ylim(-0.02, 1.02)
+            if metric == "type_i_error":
+                axis.axhline(0.05, color="black", linestyle=":", linewidth=1.0, label="zeta=0.05")
+                axis.set_ylim(*auto_metric_ylim(type_error_rows, metric, target, main_n_m, include_value=0.05))
+            else:
+                axis.set_ylim(-0.02, 1.02)
         axes[0].set_ylabel(ylabel)
         handles, labels = axes[-1].get_legend_handles_labels()
         fig.legend(handles, labels, loc="lower center", ncol=min(5, len(labels)), fontsize=8)
@@ -446,6 +448,30 @@ def make_error_experiment_charts(
     plt.tight_layout()
     plt.savefig(output_dir / "tpr_fpr_decision_region.png", dpi=160)
     plt.close()
+
+
+def auto_metric_ylim(
+    rows: list[dict[str, Any]],
+    metric: str,
+    target: str,
+    n_m: int,
+    include_value: float | None = None,
+) -> tuple[float, float]:
+    """Choose a readable y-axis range for low-variance error curves."""
+    values = [
+        float(row[metric])
+        for row in rows
+        if row["target"] == target and row["n_M"] == n_m and row.get(metric) is not None
+    ]
+    if include_value is not None:
+        values.append(include_value)
+    if not values:
+        return -0.02, 1.02
+    lower = min(values)
+    upper = max(values)
+    span = max(upper - lower, 0.02)
+    padding = span * 0.25
+    return max(0.0, lower - padding), min(1.0, upper + padding)
 
 
 def normal_type_ii_error(true_rate: float, threshold: float, sample_size: int) -> float:

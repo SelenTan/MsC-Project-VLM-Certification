@@ -115,21 +115,147 @@ def load_records(
 def write_human_label_sheet(path: Path, records: list[dict[str, Any]]) -> None:
     rows: list[dict[str, Any]] = []
     for record in records:
-        rows.append(
-            {
-                "human_label": "",
-                "human_failure_reason": "",
-                "target": record["target"],
-                "model_input_image_path": record["model_input_image_path"],
-                "prompt": record["prompt"],
-                "expected_evidence": record["expected_evidence"],
-                "expected_answer_or_behavior": record["expected_answer_or_behavior"],
-                "target_model_response": record["target_model_response"],
-                "notes": record["notes"],
-                "record_key": record_key(record),
-            }
-        )
+        rows.append(human_label_sheet_row(record))
     write_csv(path, rows)
+
+
+def selected_human_gold_records(
+    records: list[dict[str, Any]],
+    human_gold_keys: set[str],
+    targets: tuple[str, ...],
+    per_target: int,
+) -> list[dict[str, Any]]:
+    """Select the run's small calibration subset, stratified once labels are available."""
+    selected: list[dict[str, Any]] = []
+    for target in targets:
+        target_records = sorted(
+            [
+                record
+                for record in records
+                if record["target"] == target and record_key(record) in human_gold_keys
+            ],
+            key=record_key,
+        )
+        selected.extend(stratified_human_calibration_records(target_records, per_target))
+    return selected
+
+
+def selected_benchmark_human_gold_records(
+    records: list[dict[str, Any]],
+    targets: tuple[str, ...],
+    per_target: int,
+) -> list[dict[str, Any]]:
+    """Select the calibration subset from a completed full benchmark."""
+    selected: list[dict[str, Any]] = []
+    for target in targets:
+        target_records = sorted([record for record in records if record["target"] == target], key=record_key)
+        selected.extend(stratified_human_calibration_records(target_records, per_target))
+    return selected
+
+
+def stratified_human_calibration_records(records: list[dict[str, Any]], per_target: int) -> list[dict[str, Any]]:
+    """Prefer both human failure and success examples for TPR/FPR estimation."""
+    if not records or records[0].get("human_label") not in (0, 1):
+        return records[:per_target]
+
+    failures = [record for record in records if record.get("human_label") == 1]
+    successes = [record for record in records if record.get("human_label") == 0]
+    if not failures or not successes:
+        return records[:per_target]
+
+    failure_quota = min(len(failures), max(1, per_target // 2))
+    success_quota = per_target - failure_quota
+    if len(successes) < success_quota:
+        success_quota = len(successes)
+        failure_quota = min(len(failures), per_target - success_quota)
+    return sorted(failures[:failure_quota] + successes[:success_quota], key=record_key)
+
+
+def human_label_sheet_record_keys(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    with path.open("r", encoding="utf-8", newline="") as file:
+        return {
+            row["record_key"]
+            for row in csv.DictReader(file)
+            if row.get("record_key")
+        }
+
+
+def human_label_sheet_records(records: list[dict[str, Any]], path: Path) -> list[dict[str, Any]]:
+    """Return the records currently listed in the human calibration CSV."""
+    keys = human_label_sheet_record_keys(path)
+    return sorted([record for record in records if record_key(record) in keys], key=record_key)
+
+
+def human_label_sheet_row(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "human_label": "",
+        "human_failure_reason": "",
+        "target": record["target"],
+        "model_input_image_path": record["model_input_image_path"],
+        "prompt": record["prompt"],
+        "expected_evidence": record["expected_evidence"],
+        "expected_answer_or_behavior": record["expected_answer_or_behavior"],
+        "target_model_response": record["target_model_response"],
+        "notes": record["notes"],
+        "record_key": record_key(record),
+    }
+
+
+def append_human_label_sheet_rows(path: Path, records: list[dict[str, Any]]) -> None:
+    if not records:
+        return
+    with path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        fieldnames = reader.fieldnames or list(human_label_sheet_row(records[0]))
+    with path.open("a", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames, extrasaction="ignore")
+        for record in records:
+            writer.writerow(human_label_sheet_row(record))
+
+
+def targets_without_human_failures(records: list[dict[str, Any]], targets: tuple[str, ...]) -> list[str]:
+    missing: list[str] = []
+    for target in targets:
+        target_records = [record for record in records if record["target"] == target]
+        if target_records and not any(record.get("human_label") == 1 for record in target_records):
+            missing.append(target)
+    return missing
+
+
+def expand_human_label_sheet_for_missing_failures(
+    path: Path,
+    records: list[dict[str, Any]],
+    current_human_records: list[dict[str, Any]],
+    missing_targets: list[str],
+    expansion_per_target: int,
+    max_per_target: int,
+) -> list[dict[str, Any]]:
+    """Append more rows for targets whose current calibration labels have no failures."""
+    existing_keys = human_label_sheet_record_keys(path)
+    current_counts: dict[str, int] = {}
+    for record in current_human_records:
+        current_counts[record["target"]] = current_counts.get(record["target"], 0) + 1
+
+    additions: list[dict[str, Any]] = []
+    for target in missing_targets:
+        remaining_capacity = max_per_target - current_counts.get(target, 0)
+        if remaining_capacity <= 0:
+            continue
+        candidates = sorted(
+            [
+                record
+                for record in records
+                if record["target"] == target and record_key(record) not in existing_keys
+            ],
+            key=record_key,
+        )
+        take = min(expansion_per_target, remaining_capacity, len(candidates))
+        additions.extend(candidates[:take])
+        existing_keys.update(record_key(record) for record in candidates[:take])
+    append_human_label_sheet_rows(path, additions)
+    return additions
 
 
 def apply_human_label_sheet(path: Path, records: list[dict[str, Any]]) -> list[dict[str, Any]]:

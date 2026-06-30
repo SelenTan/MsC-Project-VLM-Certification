@@ -4,7 +4,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,17 +30,6 @@ class DatasetSelectionTest(unittest.TestCase):
 
             self.assertEqual(selected, "Large Dataset")
 
-    def test_multiple_valid_datasets_prompt_for_choice(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_root = Path(temp_dir)
-            write_qa_file(project_root, "Medium Dataset")
-            write_qa_file(project_root, "Large Dataset")
-
-            with patch("builtins.input", return_value="2"):
-                selected = select_dataset_dir(project_root, "Large Dataset")
-
-            self.assertEqual(selected, "Large Dataset")
-
     def test_large_dataset_can_live_outside_project(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir) / "project"
@@ -49,7 +37,6 @@ class DatasetSelectionTest(unittest.TestCase):
             project_root.mkdir()
             write_qa_file(external_root.parent, "Large_Dataset")
             dataset_paths = {
-                "Medium Dataset": "Medium Dataset",
                 "Large Dataset": str(external_root),
             }
 

@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import Optional
 
 
-DATASET_CHOICES = ("Medium Dataset", "Large Dataset")
+DATASET_CHOICES = ("Large Dataset",)
 DEFAULT_DATASET_PATHS = {
-    "Medium Dataset": "Medium Dataset",
     "Large Dataset": str(Path.home() / "datasets" / "Large_Dataset"),
 }
 
@@ -69,35 +68,11 @@ def select_dataset_dir(
     configured_dataset_dir: Optional[str] = None,
     dataset_paths: Optional[dict[str, str]] = None,
 ) -> str:
-    """Choose the dataset directory at startup when multiple project datasets are available."""
-    available = [
-        dataset_dir
-        for dataset_dir in DATASET_CHOICES
-        if resolve_dataset_path(project_root, dataset_dir, dataset_paths).exists()
+    """Return the configured large dataset when it contains QA JSON files."""
+    dataset_dir = "Large Dataset"
+    if (
+        resolve_dataset_path(project_root, dataset_dir, dataset_paths).exists()
         and qa_file_count(project_root, dataset_dir, dataset_paths) > 0
-    ]
-
-    if configured_dataset_dir and configured_dataset_dir not in DATASET_CHOICES:
-        configured_path = resolve_dataset_path(project_root, configured_dataset_dir, dataset_paths)
-        if configured_path.exists() and qa_file_count(project_root, configured_dataset_dir, dataset_paths) > 0:
-            return configured_dataset_dir
-    if configured_dataset_dir and configured_dataset_dir in available and len(available) < 2:
-        return configured_dataset_dir
-    if len(available) < 2:
-        if available:
-            return available[0]
-        raise SystemExit("No valid dataset found. Expected Medium Dataset or Large Dataset with */qa/*.json files.")
-
-    print("\nMultiple dataset directories are present. Choose which dataset to run:")
-    for index, dataset_dir in enumerate(available, start=1):
-        qa_count = qa_file_count(project_root, dataset_dir, dataset_paths)
-        print(f"{index}. {dataset_dir} ({qa_count} QA files, {resolve_dataset_path(project_root, dataset_dir, dataset_paths)})")
-
-    while True:
-        answer = input(f"Dataset choice [1-{len(available)}]: ").strip()
-        if answer.isdigit() and 1 <= int(answer) <= len(available):
-            return available[int(answer) - 1]
-        for dataset_dir in available:
-            if answer.casefold() == dataset_dir.casefold():
-                return dataset_dir
-        print(f"Please enter a number from 1 to {len(available)}.")
+    ):
+        return dataset_dir
+    raise SystemExit("No valid dataset found. Expected Large Dataset with */qa/*.json files.")

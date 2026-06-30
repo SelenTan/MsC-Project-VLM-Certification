@@ -43,6 +43,12 @@ def delete_chunk_checkpoints(run_dir: Path) -> int:
         for path in (run_dir / "chunks").glob(f"*/{filename}"):
             path.unlink(missing_ok=True)
             deleted += 1
+    for path in (run_dir / "chunks").glob("chunk-*"):
+        if path.is_dir():
+            try:
+                path.rmdir()
+            except OSError:
+                pass
     return deleted
 
 

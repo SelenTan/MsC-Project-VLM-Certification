@@ -12,8 +12,11 @@ from types import SimpleNamespace
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
-sys.path.insert(0, str(PROJECT_ROOT / "vlm_testing"))
+CODE_ROOT = PROJECT_ROOT
+if not (CODE_ROOT / "vlm_evaluation").exists() and (PROJECT_ROOT / "Core Code" / "vlm_evaluation").exists():
+    CODE_ROOT = PROJECT_ROOT / "Core Code"
+sys.path.insert(0, str(CODE_ROOT / "vlm_evaluation"))
+sys.path.insert(0, str(CODE_ROOT / "vlm_testing"))
 
 from ai_checker import CheckerError, call_checker, load_annotation_guide, require_local_endpoint
 from artifacts import (
@@ -21,10 +24,15 @@ from artifacts import (
     apply_human_label_sheet,
     create_run_dir,
     default_run_name,
+    expand_human_label_sheet_for_missing_failures,
     export_run_artifacts,
+    human_label_sheet_records,
     load_records,
     record_key,
     sample_human_gold_pool,
+    selected_benchmark_human_gold_records,
+    selected_human_gold_records,
+    targets_without_human_failures,
     update_item_fields,
     validate_target_responses,
     write_human_label_sheet,
@@ -76,13 +84,11 @@ from run_target_vlm import run_records as run_target_vlm_records
 # Paths
 DATASET_DIR = "Large Dataset"
 DATASET_PATHS = {
-    "Medium Dataset": "Medium Dataset",
     "Large Dataset": str(Path.home() / "datasets" / "Large_Dataset"),
 }
 RUNS_DIR = "runs"
 ANNOTATION_GUIDE_PATH = "ANNOTATION_GUIDE.md"
 BENCHMARK_LABELS_DIR = "benchmark_labels"
-BENCHMARK_REQUIRED_DATASETS: tuple[str, ...] = ()
 RUN_NAME = None
 
 # Target VLM response generation
@@ -133,19 +139,13 @@ CHECKER_VLLM_EXTRA_ARGS: tuple[str, ...] = ()
 BALANCE_HUMAN_GOLD_BY_CATEGORY = True
 TARGETS = ("visual_factuality", "robustness", "refusal_behavior")
 DEFAULT_CHUNK_SIZE = 1000
-# Human gold pool size per target; Monte Carlo samples N_M from this pool each repeat.
-HUMAN_GOLD_PER_TARGET = 500
-HUMAN_GOLD_PER_TARGET_BY_DATASET = {
-    "Medium Dataset": 50,
-    "Large Dataset": 500,
-}
+# Small human calibration pool size per target; Monte Carlo samples N_M from this pool each repeat.
+HUMAN_GOLD_PER_TARGET = 100
+HUMAN_GOLD_EXPANSION_PER_TARGET = 50
+HUMAN_GOLD_MAX_PER_TARGET = 1000
 N_M = 50
 N_M_GRID = (25, 50, 100)
 N_J = 1000
-N_J_BY_DATASET = {
-    "Medium Dataset": 50,
-    "Large Dataset": 1000,
-}
 
 # Random seeds
 HUMAN_GOLD_SAMPLE_SEED = 42
@@ -179,7 +179,6 @@ def current_config(run_name: str) -> dict[str, Any]:
         "runs_dir": RUNS_DIR,
         "annotation_guide_path": ANNOTATION_GUIDE_PATH,
         "benchmark_labels_dir": BENCHMARK_LABELS_DIR,
-        "benchmark_required_datasets": BENCHMARK_REQUIRED_DATASETS,
         "run_target_vlm_first": RUN_TARGET_VLM_FIRST,
         "target_model_name": TARGET_MODEL_NAME,
         "target_port": TARGET_PORT,
@@ -220,11 +219,11 @@ def current_config(run_name: str) -> dict[str, Any]:
         "checker_server_wait_timeout_seconds": CHECKER_SERVER_WAIT_TIMEOUT_SECONDS,
         "targets": TARGETS,
         "human_gold_per_target": HUMAN_GOLD_PER_TARGET,
-        "human_gold_per_target_by_dataset": HUMAN_GOLD_PER_TARGET_BY_DATASET,
+        "human_gold_expansion_per_target": HUMAN_GOLD_EXPANSION_PER_TARGET,
+        "human_gold_max_per_target": HUMAN_GOLD_MAX_PER_TARGET,
         "n_m": N_M,
         "n_j": N_J,
         "n_m_grid": N_M_GRID,
-        "n_j_by_dataset": N_J_BY_DATASET,
         "human_gold_sample_seed": HUMAN_GOLD_SAMPLE_SEED,
         "monte_carlo_seed": MONTE_CARLO_SEED,
         "repeats": B,
@@ -245,8 +244,8 @@ def current_config(run_name: str) -> dict[str, Any]:
     }
 
 
-def configured_n_j(dataset_dir: str) -> int:
-    return N_J_BY_DATASET.get(dataset_dir, N_J)
+def configured_n_j() -> int:
+    return N_J
 
 
 def available_records_per_target(records: list[dict[str, Any]]) -> dict[str, int]:
@@ -254,15 +253,15 @@ def available_records_per_target(records: list[dict[str, Any]]) -> dict[str, int
     return {target: counts[target] for target in TARGETS}
 
 
-def effective_n_j(dataset_dir: str, evaluation_records: list[dict[str, Any]]) -> int:
-    configured = configured_n_j(dataset_dir)
+def effective_n_j(evaluation_records: list[dict[str, Any]]) -> int:
+    configured = configured_n_j()
     available = available_records_per_target(evaluation_records)
     smallest_pool = min(available.values()) if available else 0
     return min(configured, smallest_pool)
 
 
-def configured_human_gold_per_target(dataset_dir: str) -> int:
-    return HUMAN_GOLD_PER_TARGET_BY_DATASET.get(dataset_dir, HUMAN_GOLD_PER_TARGET)
+def configured_human_gold_per_target() -> int:
+    return HUMAN_GOLD_PER_TARGET
 
 
 def target_internal_endpoint() -> str:
@@ -271,7 +270,7 @@ def target_internal_endpoint() -> str:
 
 def maybe_start_target_server(run_dir: Path) -> ManagedServer:
     """Start the target VLM server only when selected records still need model responses."""
-    if not RUN_TARGET_VLM_FIRST or not target_responses_needed():
+    if not RUN_TARGET_VLM_FIRST:
         return ManagedServer(process=None, log_path=None)
     cuda_visible_devices = TARGET_CUDA_VISIBLE_DEVICES
     if cuda_visible_devices is None:
@@ -297,15 +296,6 @@ def maybe_start_target_server(run_dir: Path) -> ManagedServer:
         wait_timeout_seconds=TARGET_SERVER_WAIT_TIMEOUT_SECONDS,
         server_label="target VLM",
     )
-
-
-def target_responses_needed() -> bool:
-    if not RUN_TARGET_VLM_FIRST:
-        return False
-    if TARGET_OVERWRITE_RESPONSES:
-        return True
-    records = load_records(PROJECT_ROOT, DATASET_DIR, TARGETS, DATASET_PATHS)
-    return any(not record.get("target_model_response") for record in records)
 
 
 def maybe_start_checker_server(run_dir: Path) -> ManagedServer:
@@ -511,7 +501,7 @@ def start_new_run() -> Path:
     human_gold_records = sample_human_gold_pool(
         records=records,
         targets=TARGETS,
-        per_target=configured_human_gold_per_target(DATASET_DIR),
+        per_target=configured_human_gold_per_target(),
         seed=HUMAN_GOLD_SAMPLE_SEED,
         balance_by_image_type=BALANCE_HUMAN_GOLD_BY_CATEGORY,
     )
@@ -638,20 +628,16 @@ def print_selected_chunk_status(run_dir: Path, manifest_rows: list[dict[str, Any
 
 
 def print_next_chunk_hint(run_dir: Path, manifest_rows: list[dict[str, Any]], chunks: list[int] | None = None) -> None:
-    """Print the next unfinished chunk and compact unfinished chunk ranges."""
+    """Print the next unfinished chunk for quick resume context."""
     summary = progress_summary(run_dir, manifest_rows)
     selected_chunks = chunks or [int(row["chunk_index"]) for row in summary["chunks"]]
-    unfinished = [int(row["chunk_index"]) for row in summary["chunks"] if not row["complete"]]
     resume = next_resume_row(run_dir, manifest_rows, selected_chunks)
-    if resume is None:
-        print("Next unfinished chunk: none.")
-    else:
+    if resume is not None:
         print(
             f"Next unfinished chunk: {resume['chunk_name']} at {resume['stage']} "
             f"(target {resume['target_done']}/{resume['total']}, "
             f"checker {resume['judge_done']}/{resume['total']})."
         )
-    print(f"Unfinished chunks: {format_chunk_ranges(unfinished)}")
 
 
 def chunks_needing_target(records: list[dict[str, Any]], run_dir: Path, manifest_rows: list[dict[str, Any]], chunks: list[int]) -> list[int]:
@@ -774,6 +760,12 @@ def run_chunks(run_dir: Path, chunks: list[int]) -> None:
 def choose_chunks(run_dir: Path) -> list[int]:
     manifest_rows = load_manifest(run_dir)
     available = chunk_indexes(manifest_rows)
+    if load_run_status(run_dir).get("status") == "completed":
+        print("\nCompleted run selected. This will rerun checker only from dataset_snapshot.")
+        print(f"Chunk numbers: {available[0]}-{available[-1]}")
+        answer = input("Rerun checker for which chunks? Example: 0 or 0-9: ").strip()
+        return parse_chunk_selection(answer, available)
+
     summary = progress_summary(run_dir, manifest_rows)
     first_chunk = available[0]
     last_chunk = available[-1]
@@ -799,7 +791,59 @@ def continue_local_chunks() -> None:
 def run_selected_chunks() -> None:
     run_dir = choose_run_dir()
     chunks = choose_chunks(run_dir)
-    run_chunks(run_dir, chunks)
+    if load_run_status(run_dir).get("status") == "completed":
+        rerun_checker_chunks(run_dir, chunks)
+    else:
+        run_chunks(run_dir, chunks)
+
+
+def rerun_checker_chunks(run_dir: Path, chunks: list[int]) -> None:
+    """Rerun checker labels for a completed run using saved target responses in dataset_snapshot."""
+    global DATASET_DIR
+
+    config = load_run_config(run_dir)
+    DATASET_DIR = config["dataset_dir"]
+    source_dataset_paths = snapshot_dataset_paths(run_dir)
+    if source_dataset_paths is None:
+        raise SystemExit("This completed run has no dataset_snapshot, so checker-only rerun is not available.")
+
+    manifest_rows = load_manifest(run_dir)
+    records = load_records(PROJECT_ROOT, DATASET_DIR, TARGETS, source_dataset_paths)
+    selected_records = records_for_chunks(records, manifest_rows, chunks)
+    if not selected_records:
+        raise SystemExit("Selected chunks contain no records.")
+    validate_target_responses(selected_records)
+
+    print(f"\nRerunning checker only for chunks: {format_chunk_ranges(chunks)}")
+    print("Target VLM responses will be reused from dataset_snapshot.")
+    require_local_endpoint(CHECKER_INTERNAL_ENDPOINT, ALLOW_NON_LOCAL_CHECKER)
+
+    checker_server = ManagedServer(process=None, log_path=None)
+    try:
+        checker_server = maybe_start_checker_server(run_dir)
+        annotation_guide = load_annotation_guide(PROJECT_ROOT / ANNOTATION_GUIDE_PATH)
+        for position, chunk_index in enumerate(chunks, start=1):
+            chunk_records = records_for_chunks(records, manifest_rows, [chunk_index])
+            print(f"Checker rerun chunk {position}/{len(chunks)}: chunk-{chunk_index:03d} ({len(chunk_records)} items).")
+            judge_records(
+                chunk_records,
+                annotation_guide,
+                stage=f"checker-rerun chunk-{chunk_index:03d}",
+                checkpoint_path=None,
+                persist_to_dataset=True,
+                completed_rows={},
+            )
+        write_run_status(run_dir, "completed", dataset_dir=DATASET_DIR, checker_rerun_chunks=chunks)
+        print("\nChecker-only rerun complete. Next step: choose 3 to rebuild final results.")
+    except Exception:
+        error_path = run_dir / "logs" / "checker_rerun_error.log"
+        error_path.parent.mkdir(parents=True, exist_ok=True)
+        error_path.write_text(traceback.format_exc(), encoding="utf-8")
+        print(f"Checker rerun failed. Full traceback saved to {error_path}", file=sys.stderr, flush=True)
+        raise
+    finally:
+        if checker_server.started_by_script:
+            checker_server.stop()
 
 
 def show_run_progress(run_dir: Path | None = None) -> None:
@@ -813,15 +857,17 @@ def show_run_progress(run_dir: Path | None = None) -> None:
     print(f"Chunks: {summary['completed_chunks']}/{summary['total_chunks']} completed")
     print(f"VLM responses saved: {summary['target_done']}/{summary['total_records']}")
     print(f"Checker labels completed: {summary['judge_done']}/{summary['total_records']} ({summary['completion_percent']}%)")
-    if active_chunks:
-        print(f"Active chunks on last run: {format_chunk_ranges(active_chunks)}")
-    print_next_chunk_hint(run_dir, manifest_rows, active_chunks or None)
-    print("Chunk checkpoints are temporary and are cleaned after final results are built.")
     if summary["judge_done"] == summary["total_records"]:
-        print("Next step: choose 4. Build final results from completed chunks.")
+        print("Next step: choose 3. Build final results from completed chunks.")
     elif summary["target_done"] == summary["total_records"]:
+        if active_chunks:
+            print(f"Active chunks on last run: {format_chunk_ranges(active_chunks)}")
+        print_next_chunk_hint(run_dir, manifest_rows, active_chunks or None)
         print("Next step: checker labels are not finished; continue this run.")
     else:
+        if active_chunks:
+            print(f"Active chunks on last run: {format_chunk_ranges(active_chunks)}")
+        print_next_chunk_hint(run_dir, manifest_rows, active_chunks or None)
         print("Next step: VLM responses are not finished; continue this run.")
 
 
@@ -830,12 +876,6 @@ def snapshot_dataset_paths(run_dir: Path) -> dict[str, str] | None:
     if not snapshot_dir.exists():
         return None
     return {**DATASET_PATHS, DATASET_DIR: str(snapshot_dir)}
-
-
-def load_run_records(run_dir: Path, prefer_snapshot: bool = False) -> list[dict[str, Any]]:
-    """Load records from the archived snapshot when available, otherwise from the working dataset."""
-    source_paths = snapshot_dataset_paths(run_dir) if prefer_snapshot else None
-    return load_records(PROJECT_ROOT, DATASET_DIR, TARGETS, source_paths or DATASET_PATHS)
 
 
 def ensure_benchmark_label_csv(
@@ -901,34 +941,39 @@ def build_final_results() -> None:
     if benchmark_path.exists():
         try:
             human_labelled_records = apply_benchmark_labels(records, read_benchmark_csv(benchmark_path))
-        except ValueError as exc:
-            if DATASET_DIR in BENCHMARK_REQUIRED_DATASETS:
-                print(f"Benchmark labels are not ready: {exc}")
-                print(f"Benchmark label file: {benchmark_path}")
-                write_run_status(run_dir, "waiting_for_benchmark_labels", dataset_dir=DATASET_DIR)
-                return
+        except ValueError:
             print(f"Full benchmark labels are not complete yet: {benchmark_path}")
             print("Certification will use the small human calibration CSV for now.")
-            print("For Type I/II paper experiments later, complete the benchmark CSV and choose 4 again.")
+            print("For Type I/II paper experiments later, complete the benchmark CSV and choose 3 again.")
         else:
-            human_gold_keys = load_human_gold_keys(run_dir)
-            human_gold_records = [record for record in human_labelled_records if record_key(record) in human_gold_keys]
-            evaluation_records = [record for record in human_labelled_records if record_key(record) not in human_gold_keys]
+            human_gold_records = selected_benchmark_human_gold_records(
+                human_labelled_records,
+                TARGETS,
+                configured_human_gold_per_target(),
+            )
+            selected_gold_keys = {record_key(record) for record in human_gold_records}
+            evaluation_records = [record for record in human_labelled_records if record_key(record) not in selected_gold_keys]
             use_run_human_sheet = False
             print(f"Using benchmark human labels: {benchmark_path}")
 
     if use_run_human_sheet:
         human_gold_keys = load_human_gold_keys(run_dir)
-        human_gold_records = [record for record in records if record_key(record) in human_gold_keys]
+        initial_human_gold_records = selected_human_gold_records(
+            records,
+            human_gold_keys,
+            TARGETS,
+            configured_human_gold_per_target(),
+        )
         human_label_sheet_path = run_dir / "human_label_tasks.csv"
         if not human_label_sheet_path.exists():
-            write_human_label_sheet(human_label_sheet_path, human_gold_records)
-            print_human_label_instructions(human_gold_records)
+            write_human_label_sheet(human_label_sheet_path, initial_human_gold_records)
+            print_human_label_instructions(initial_human_gold_records)
             print(f"\nHuman label sheet created: {human_label_sheet_path}")
-            print("Fill this CSV, then choose 4 again to build final results.")
+            print("Fill this CSV, then choose 3 again to build final results.")
             write_run_status(run_dir, "waiting_for_human_labels", dataset_dir=DATASET_DIR)
             return
 
+        human_gold_records = human_label_sheet_records(records, human_label_sheet_path)
         try:
             human_gold_records = apply_human_label_sheet(human_label_sheet_path, human_gold_records)
         except ValueError as exc:
@@ -936,6 +981,29 @@ def build_final_results() -> None:
             print(f"Human label sheet: {human_label_sheet_path}")
             write_run_status(run_dir, "waiting_for_human_labels", dataset_dir=DATASET_DIR)
             return
+        missing_failure_targets = targets_without_human_failures(human_gold_records, TARGETS)
+        if missing_failure_targets:
+            added_records = expand_human_label_sheet_for_missing_failures(
+                human_label_sheet_path,
+                records,
+                human_gold_records,
+                missing_failure_targets,
+                HUMAN_GOLD_EXPANSION_PER_TARGET,
+                HUMAN_GOLD_MAX_PER_TARGET,
+            )
+            if added_records:
+                added_counts = Counter(record["target"] for record in added_records)
+                print("\nCurrent human calibration labels have no failure for:")
+                for target in missing_failure_targets:
+                    if added_counts[target]:
+                        print(f"- {target}: added {added_counts[target]} more rows to label")
+                print(f"Human label sheet updated: {human_label_sheet_path}")
+                print("Fill the new blank rows, then choose 3 again to build final results.")
+                write_run_status(run_dir, "waiting_for_human_labels", dataset_dir=DATASET_DIR)
+                return
+            print("\nCurrent human calibration labels still have no failure for:")
+            for target in missing_failure_targets:
+                print(f"- {target}: reached {HUMAN_GOLD_MAX_PER_TARGET} calibration rows")
         gold_keys = {record_key(record) for record in human_gold_records}
         evaluation_records = [record for record in records if record_key(record) not in gold_keys]
 
@@ -947,11 +1015,11 @@ def build_final_results() -> None:
             print(f"- {row['target']}: {row['unreliable_reason']}")
         monte_carlo_rows: list[dict[str, Any]] = []
     else:
-        n_j_for_run = effective_n_j(DATASET_DIR, evaluation_records)
+        n_j_for_run = effective_n_j(evaluation_records)
         if n_j_for_run <= 0:
             raise ValueError("No evaluation records are available after selecting the human calibration set.")
-        if n_j_for_run < configured_n_j(DATASET_DIR):
-            print(f"Using N_J={n_j_for_run} because the evaluation pool is smaller than configured N_J={configured_n_j(DATASET_DIR)}.")
+        if n_j_for_run < configured_n_j():
+            print(f"Using N_J={n_j_for_run} because the evaluation pool is smaller than configured N_J={configured_n_j()}.")
         print(f"Running {B} Monte Carlo repeats per target with N_J={n_j_for_run}...", flush=True)
         monte_carlo_rows = run_monte_carlo(
             human_gold_records=human_gold_records,
@@ -975,16 +1043,10 @@ def build_final_results() -> None:
         dataset_paths=source_dataset_paths,
     )
     if use_run_human_sheet:
-        print(f"Paper-style Type I/II experiments skipped: full benchmark labels are not complete.")
-        print(f"To run them later, complete this CSV and choose 4 again: {benchmark_path}")
+        print("Paper-style Type I/II experiments need completed full benchmark labels.")
     else:
-        try:
-            run_paper_style_experiments(run_dir)
-        except ValueError as exc:
-            print(f"Paper-style experiments skipped: {exc}")
-    deleted_checkpoints = delete_chunk_checkpoints(run_dir)
-    if deleted_checkpoints:
-        print(f"Cleaned {deleted_checkpoints} chunk checkpoint file(s).")
+        run_paper_style_experiments(run_dir)
+    delete_chunk_checkpoints(run_dir)
     write_run_status(run_dir, "completed", dataset_dir=DATASET_DIR)
     print(f"\nRun complete. Artifacts saved under {run_dir}")
 
@@ -1010,7 +1072,7 @@ def run_paper_style_experiments(run_dir: Path | None = None) -> None:
         raise ValueError(f"{len(missing_judge_labels)} judge labels are missing from the saved dataset. Examples: {examples}")
     records = apply_benchmark_labels(records, read_benchmark_csv(benchmark_path))
     output_dir = run_dir / "error_experiments"
-    n_j_for_experiments = effective_n_j(DATASET_DIR, records)
+    n_j_for_experiments = effective_n_j(records)
     type_error_rows = run_type_error_experiment(
         records=records,
         targets=TARGETS,
