@@ -1,7 +1,10 @@
 .DS_Store
 /dataset
 /Medium Dataset
+/large_dataset
+/benchmark_labels
 /Large Dataset
 /.venv
 __pycache__/
+/runs
 .env*
