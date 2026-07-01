@@ -370,7 +370,7 @@ def update_item_fields(record: dict[str, Any], fields: dict[str, Any]) -> None:
     item = data["items"][record["item_index"]]
     for key, value in fields.items():
         item[key] = value
-    qa_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json(qa_path, data)
 
 
 def apply_checker_results(records_by_key: dict[str, dict[str, Any]], checker_rows: list[dict[str, Any]]) -> None:
@@ -407,7 +407,9 @@ def validate_human_labels(records: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def write_json(path: Path, data: Any) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def append_jsonl(path: Path, row: dict[str, Any]) -> None:
@@ -438,6 +440,8 @@ def copy_dataset_snapshot(
     """Archive QA JSON state only; image files are immutable dataset inputs and are not copied."""
     source = resolve_dataset_path(project_root, dataset_dir, dataset_paths)
     destination = run_dir / "dataset_snapshot"
+    if source.resolve() == destination.resolve():
+        return
     for qa_path in sorted(source.glob("*/qa/*.json")):
         relative_path = qa_path.relative_to(source)
         target_path = destination / relative_path

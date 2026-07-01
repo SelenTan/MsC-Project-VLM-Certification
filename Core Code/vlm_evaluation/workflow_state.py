@@ -37,18 +37,31 @@ def judge_results_path(run_dir: Path, chunk_index: int) -> Path:
 
 
 def delete_chunk_checkpoints(run_dir: Path) -> int:
-    """Remove per-chunk target/checker checkpoints after final QA snapshots are archived."""
+    """Remove chunk checkpoints while preserving the manifest for completed-run debugging."""
     deleted = 0
+    chunks_dir = run_dir / "chunks"
     for filename in (TARGET_RESULTS_FILE, JUDGE_RESULTS_FILE):
-        for path in (run_dir / "chunks").glob(f"*/{filename}"):
+        for path in chunks_dir.glob(f"*/{filename}"):
             path.unlink(missing_ok=True)
             deleted += 1
-    for path in (run_dir / "chunks").glob("chunk-*"):
+    manifest_path = run_dir / MANIFEST_FILE
+    if manifest_path.exists():
+        archived_manifest = run_dir / LEGACY_MANIFEST_FILE
+        if archived_manifest.exists():
+            manifest_path.unlink()
+            deleted += 1
+        else:
+            manifest_path.replace(archived_manifest)
+    for path in chunks_dir.glob("chunk-*"):
         if path.is_dir():
             try:
                 path.rmdir()
             except OSError:
                 pass
+    try:
+        chunks_dir.rmdir()
+    except OSError:
+        pass
     return deleted
 
 
@@ -266,13 +279,12 @@ def collect_chunk_results(
     value_field: str,
     error_field: str,
 ) -> dict[str, dict[str, Any]]:
-    """Collect completed rows and fail if the same record has conflicting results."""
+    """Collect the latest successful checkpoint row for each manifest record."""
     chunk_to_keys: dict[int, set[str]] = {}
     for row in manifest_rows:
         chunk_to_keys.setdefault(int(row["chunk_index"]), set()).add(row["record_key"])
 
     merged: dict[str, dict[str, Any]] = {}
-    conflicts: list[str] = []
     for chunk_index in sorted(chunk_to_keys):
         rows = read_jsonl(chunk_dir(run_dir, chunk_index) / result_name)
         for row in rows:
@@ -281,13 +293,7 @@ def collect_chunk_results(
                 continue
             if key not in chunk_to_keys[chunk_index]:
                 raise ValueError(f"Result for {key} appears in the wrong chunk {chunk_name(chunk_index)}.")
-            existing = merged.get(key)
-            if existing is not None and existing.get(value_field) != row.get(value_field):
-                conflicts.append(key)
             merged[key] = row
-    if conflicts:
-        examples = ", ".join(conflicts[:10])
-        raise ValueError(f"Conflicting {result_name} rows for {len(conflicts)} records: {examples}")
     return merged
 
 

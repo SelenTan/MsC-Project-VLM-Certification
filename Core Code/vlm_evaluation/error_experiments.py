@@ -22,12 +22,22 @@ from certification import (
 
 PPI_VARIANTS = ("ppi", "ppi_plus", "ridge_ppi")
 METHODS = ("direct_ht", "noisy_ht", "oracle_noisy_ht", *PPI_VARIANTS)
-PLOTTED_METHODS = ("direct_ht", "noisy_ht", "oracle_noisy_ht", "ppi_plus")
+PLOTTED_METHODS = METHODS
 METHOD_LABELS = {
     "direct_ht": "Direct HT",
-    "noisy_ht": "Noisy HT",
-    "oracle_noisy_ht": "Oracle Noisy HT",
+    "noisy_ht": "Noisy HT (general)",
+    "oracle_noisy_ht": "Noisy HT (oracle)",
+    "ppi": "PPI",
     "ppi_plus": "PPI++",
+    "ridge_ppi": "Ridge PPI",
+}
+METHOD_STYLES = {
+    "direct_ht": {"color": "#1f77b4", "linestyle": "-"},
+    "noisy_ht": {"color": "#ff7f0e", "linestyle": "-"},
+    "oracle_noisy_ht": {"color": "#2ca02c", "linestyle": "--"},
+    "ppi": {"color": "#d62728", "linestyle": "-"},
+    "ppi_plus": {"color": "#9467bd", "linestyle": "-"},
+    "ridge_ppi": {"color": "#8c564b", "linestyle": "-"},
 }
 
 
@@ -359,6 +369,7 @@ def run_calibration_stability(
 def make_error_experiment_charts(
     output_dir: Path,
     type_error_rows: list[dict[str, Any]],
+    calibration_rows: list[dict[str, Any]],
     main_n_m: int,
     main_n_j: int,
 ) -> None:
@@ -372,24 +383,32 @@ def make_error_experiment_charts(
     except ModuleNotFoundError as exc:
         raise RuntimeError("Chart generation requires Matplotlib.") from exc
 
+    for obsolete_name in ("type_i_error_by_alpha.png", "type_ii_error_by_alpha.png"):
+        (output_dir / obsolete_name).unlink(missing_ok=True)
+
     targets = sorted({row["target"] for row in type_error_rows})
-    for metric, filename, ylabel in (
-        ("type_i_error", "type_i_error_by_alpha.png", "Type I error probability"),
-        ("type_ii_error", "type_ii_error_by_alpha.png", "Type II error probability"),
-    ):
-        fig, axes = plt.subplots(1, len(targets), figsize=(5 * len(targets), 4), sharey=True)
-        if len(targets) == 1:
+    for target in targets:
+        n_m_values = sorted({int(row["n_M"]) for row in type_error_rows if row["target"] == target})
+        fig, axes = plt.subplots(1, len(n_m_values), figsize=(4.9 * len(n_m_values), 3.9), sharey=True)
+        if len(n_m_values) == 1:
             axes = [axes]
-        for axis, target in zip(axes, targets):
+        for axis, n_m in zip(axes, n_m_values):
+            panel_rows = [row for row in type_error_rows if row["target"] == target and int(row["n_M"]) == n_m]
+            if not panel_rows:
+                continue
+            zeta = float(panel_rows[0]["zeta"])
+            n_j = int(panel_rows[0]["n_J"])
+            true_failure_rate = float(panel_rows[0]["true_failure_rate"])
+            oracle_tpr = panel_rows[0].get("oracle_TPR")
+            oracle_fpr = panel_rows[0].get("oracle_FPR")
+            add_paper_background(axis)
             for method in PLOTTED_METHODS:
                 rows = sorted(
                     [
                         row
-                        for row in type_error_rows
-                        if row["target"] == target
-                        and row["method"] == method
-                        and row["n_M"] == main_n_m
-                        and row[metric] is not None
+                        for row in panel_rows
+                        if row["method"] == method
+                        and combined_type_error_value(row) is not None
                     ],
                     key=lambda row: row["alpha"],
                 )
@@ -397,22 +416,37 @@ def make_error_experiment_charts(
                     continue
                 axis.plot(
                     [row["alpha"] for row in rows],
-                    [row[metric] for row in rows],
+                    [combined_type_error_value(row) for row in rows],
                     label=METHOD_LABELS[method],
                     linewidth=1.6,
+                    **METHOD_STYLES[method],
                 )
-            axis.set_title(target)
-            axis.set_xlabel("alpha")
-            if metric == "type_i_error":
-                axis.axhline(0.05, color="black", linestyle=":", linewidth=1.0, label="zeta=0.05")
-                axis.set_ylim(*auto_metric_ylim(type_error_rows, metric, target, main_n_m, include_value=0.05))
-            else:
-                axis.set_ylim(-0.02, 1.02)
-        axes[0].set_ylabel(ylabel)
+            axis.axhline(zeta, color="0.45", linestyle=":", linewidth=0.9)
+            axis.axvline(true_failure_rate, color="0.25", linestyle="--", linewidth=0.9)
+            axis.text(0.02, zeta + 0.025, rf"$\zeta={zeta:.2f}$", transform=axis.get_yaxis_transform(), fontsize=8)
+            axis.text(
+                true_failure_rate - 0.01,
+                0.47,
+                rf"$R_M={true_failure_rate:.2f}$",
+                rotation=90,
+                ha="right",
+                va="center",
+                fontsize=8,
+            )
+            axis.text(0.02, 0.86, "Type I Error Probability", transform=axis.transAxes, fontsize=9)
+            axis.text(0.56, 0.86, "Type II Error Probability", transform=axis.transAxes, fontsize=9)
+            axis.set_ylim(0.0, 1.0)
+            axis.set_xlim(*paper_alpha_xlim(panel_rows))
+            axis.set_xlabel(r"Threshold $\alpha$")
+            tpr_text = "nan" if oracle_tpr is None else f"{float(oracle_tpr):.3f}"
+            fpr_text = "nan" if oracle_fpr is None else f"{float(oracle_fpr):.3f}"
+            axis.set_title(rf"$n_M$ = {n_m}, $n_J$ = {n_j}, TPR = {tpr_text}, FPR = {fpr_text}", fontsize=10)
+        axes[0].set_ylabel(r"$P_e^{(I)} / P_e^{(II)}$")
         handles, labels = axes[-1].get_legend_handles_labels()
-        fig.legend(handles, labels, loc="lower center", ncol=min(5, len(labels)), fontsize=8)
-        fig.tight_layout(rect=[0, 0.12, 1, 1])
-        fig.savefig(output_dir / filename, dpi=160)
+        fig.suptitle(target, y=1.03, fontsize=12, fontweight="bold")
+        fig.legend(handles, labels, loc="lower center", ncol=min(6, len(labels)), fontsize=8)
+        fig.tight_layout(rect=[0, 0.14, 1, 0.98])
+        fig.savefig(output_dir / f"type_i_type_ii_by_alpha_{target}.png", dpi=180)
         plt.close()
 
     region_rows = decision_region_rows(alpha=0.25, zeta=0.05, n_m=main_n_m, n_j=main_n_j, true_failure_rate=0.10)
@@ -449,29 +483,68 @@ def make_error_experiment_charts(
     plt.savefig(output_dir / "tpr_fpr_decision_region.png", dpi=160)
     plt.close()
 
+    if calibration_rows:
+        make_calibration_stability_chart(output_dir, calibration_rows)
 
-def auto_metric_ylim(
-    rows: list[dict[str, Any]],
-    metric: str,
-    target: str,
-    n_m: int,
-    include_value: float | None = None,
-) -> tuple[float, float]:
-    """Choose a readable y-axis range for low-variance error curves."""
-    values = [
-        float(row[metric])
-        for row in rows
-        if row["target"] == target and row["n_M"] == n_m and row.get(metric) is not None
-    ]
-    if include_value is not None:
-        values.append(include_value)
-    if not values:
-        return -0.02, 1.02
-    lower = min(values)
-    upper = max(values)
-    span = max(upper - lower, 0.02)
-    padding = span * 0.25
-    return max(0.0, lower - padding), min(1.0, upper + padding)
+
+def add_paper_background(axis: Any) -> None:
+    axis.patch.set_facecolor("white")
+    axis.patch.set_hatch("//////")
+    axis.patch.set_edgecolor("0.92")
+    axis.grid(False)
+
+
+def combined_type_error_value(row: dict[str, Any]) -> float | None:
+    true_failure_rate = float(row["true_failure_rate"])
+    alpha = float(row["alpha"])
+    if alpha <= true_failure_rate:
+        return row.get("type_i_error")
+    return row.get("type_ii_error")
+
+
+def paper_alpha_xlim(rows: list[dict[str, Any]]) -> tuple[float, float]:
+    alphas = [float(row["alpha"]) for row in rows]
+    if not alphas:
+        return 0.0, 1.0
+    left = min(alphas)
+    right = max(alphas)
+    padding = max((right - left) * 0.035, 0.01)
+    return max(0.0, left - padding), min(1.0, right + padding)
+
+
+def make_calibration_stability_chart(output_dir: Path, calibration_rows: list[dict[str, Any]]) -> None:
+    targets = sorted({row["target"] for row in calibration_rows})
+    fig, axes = plt.subplots(1, len(targets), figsize=(4.8 * len(targets), 3.4), sharey=True)
+    if len(targets) == 1:
+        axes = [axes]
+    for axis, target in zip(axes, targets):
+        rows = sorted([row for row in calibration_rows if row["target"] == target], key=lambda row: row["n_M"])
+        n_m_values = [row["n_M"] for row in rows]
+        axis.errorbar(
+            n_m_values,
+            [row["TPR_mean"] for row in rows],
+            yerr=[row["TPR_stderr"] for row in rows],
+            marker="o",
+            linewidth=1.6,
+            label="TPR",
+        )
+        axis.errorbar(
+            n_m_values,
+            [row["FPR_mean"] for row in rows],
+            yerr=[row["FPR_stderr"] for row in rows],
+            marker="o",
+            linewidth=1.6,
+            label="FPR",
+        )
+        axis.set_title(target)
+        axis.set_xlabel(r"$n_M$")
+        axis.set_ylim(0.0, 1.0)
+    axes[0].set_ylabel("Estimated rate")
+    handles, labels = axes[-1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=8)
+    fig.tight_layout(rect=[0, 0.14, 1, 1])
+    fig.savefig(output_dir / "calibration_stability_by_n_m.png", dpi=180)
+    plt.close()
 
 
 def normal_type_ii_error(true_rate: float, threshold: float, sample_size: int) -> float:
@@ -523,10 +596,11 @@ def decision_region_rows(
 def write_error_experiment_artifacts(
     output_dir: Path,
     type_error_rows: list[dict[str, Any]],
+    calibration_rows: list[dict[str, Any]],
     main_n_m: int,
     main_n_j: int,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    make_error_experiment_charts(output_dir / "charts", type_error_rows, main_n_m, main_n_j)
+    make_error_experiment_charts(output_dir / "charts", type_error_rows, calibration_rows, main_n_m, main_n_j)
     checkpoint_path = output_dir / "type_i_type_ii_checkpoint.csv"
     checkpoint_path.unlink(missing_ok=True)

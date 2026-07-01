@@ -230,6 +230,7 @@ def start_vllm_server(
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    env["HF_HUB_DISABLE_XET"] = "1"
     if cuda_visible_devices:
         env["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
@@ -240,6 +241,7 @@ def start_vllm_server(
         print(f"Starting {server_label} server. Log: {log_path}", flush=True)
         log_file.write(f"\n\n=== vLLM command ===\n{command_text}\n".encode("utf-8"))
         log_file.write(f"CUDA_VISIBLE_DEVICES={env.get('CUDA_VISIBLE_DEVICES', '')}\n".encode("utf-8"))
+        log_file.write(f"HF_HUB_DISABLE_XET={env['HF_HUB_DISABLE_XET']}\n".encode("utf-8"))
         log_file.flush()
         process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=env)
         wait_for_endpoint(endpoint, served_model_name, process, wait_timeout_seconds, log_path)

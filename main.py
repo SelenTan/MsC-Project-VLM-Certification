@@ -42,13 +42,13 @@ from benchmark_labels import (
     apply_benchmark_labels,
     default_benchmark_path,
     load_benchmark_rows,
-    merge_existing_benchmark_labels,
     read_benchmark_csv,
     write_benchmark_csv,
 )
 from certification import alpha_grid, estimate_reliability, run_monte_carlo, summarize_certificates
 from dataset_selection import select_dataset_dir
 from error_experiments import (
+    run_calibration_stability,
     run_type_error_experiment,
     write_error_experiment_artifacts,
 )
@@ -416,13 +416,7 @@ def print_human_label_instructions(human_gold_records: list[dict[str, Any]]) -> 
     counts_text = ", ".join(f"{target}: {target_counts[target]}" for target in TARGETS)
     print("\nHuman calibration labels are needed before certification.")
     print(f"Rows to label: {len(human_gold_records)} ({counts_text}).")
-    print("This is the small human calibration set, not a full-dataset benchmark.")
     print("Fill human_label in the generated CSV label sheet.")
-    for record in human_gold_records[:5]:
-        print(
-            f"- {record['item_id']} | {record['target']} | "
-            f"{record['model_input_image_path']} | {record['qa_json_abs_path']}"
-        )
     print("\nUse human_label = 0 for success and human_label = 1 for failure.")
     print("For failures, fill human_failure_reason if possible.")
 
@@ -463,10 +457,33 @@ def run_dirs() -> list[Path]:
             for path in runs_path.iterdir()
             if path.is_dir()
             and (path / "run_config.json").exists()
-            and ((path / "chunks" / "manifest.jsonl").exists() or (path / "manifest.jsonl").exists())
+            and (
+                (path / "chunks" / "manifest.jsonl").exists()
+                or (path / "manifest.jsonl").exists()
+                or (path / "dataset_snapshot").exists()
+            )
         ],
         key=lambda path: path.name,
     )
+
+
+def ensure_run_manifest(run_dir: Path) -> None:
+    """Rebuild a missing completed-run manifest from its archived dataset snapshot."""
+    if (run_dir / "chunks" / "manifest.jsonl").exists() or (run_dir / "manifest.jsonl").exists():
+        return
+    if not (run_dir / "dataset_snapshot").exists():
+        return
+    config = load_run_config(run_dir)
+    dataset_dir = config["dataset_dir"]
+    chunk_size = int(config.get("chunk_size") or config.get("default_chunk_size") or DEFAULT_CHUNK_SIZE)
+    records = load_records(PROJECT_ROOT, dataset_dir, TARGETS, snapshot_dataset_paths(run_dir))
+    write_manifest(run_dir, group_records_for_chunks(records, chunk_size))
+    chunks_manifest = run_dir / "chunks" / "manifest.jsonl"
+    chunks_manifest.replace(run_dir / "manifest.jsonl")
+    try:
+        (run_dir / "chunks").rmdir()
+    except OSError:
+        pass
 
 
 def choose_run_dir() -> Path:
@@ -480,7 +497,10 @@ def choose_run_dir() -> Path:
     answer = input(f"Choose run [1-{len(runs)}]: ").strip()
     if not answer.isdigit() or not 1 <= int(answer) <= len(runs):
         raise SystemExit("Invalid run choice.")
-    return runs[int(answer) - 1]
+    run_dir = runs[int(answer) - 1]
+    ensure_run_manifest(run_dir)
+    return run_dir
+
 
 
 def start_new_run() -> Path:
@@ -529,6 +549,7 @@ def start_new_run() -> Path:
 def target_args_for_config(config: dict[str, Any]) -> SimpleNamespace:
     return SimpleNamespace(
         dataset_dir=config["dataset_dir"],
+        dataset_paths=config.get("dataset_paths", DATASET_PATHS),
         port=config["target_port"],
         model=config["target_model_name"],
         api_key_env="LOCAL_VLM_API_KEY",
@@ -549,6 +570,13 @@ def materialize_target_rows(records: list[dict[str, Any]], rows_by_key: dict[str
         row = rows_by_key.get(record_key(record))
         if row is not None:
             update_item_fields(record, {"target_model_response": row["target_model_response"]})
+
+
+def apply_target_rows_to_records(records: list[dict[str, Any]], rows_by_key: dict[str, dict[str, Any]]) -> None:
+    for record in records:
+        row = rows_by_key.get(record_key(record))
+        if row is not None:
+            record["target_model_response"] = row["target_model_response"]
 
 
 def materialize_judge_rows(records: list[dict[str, Any]], rows_by_key: dict[str, dict[str, Any]]) -> None:
@@ -711,7 +739,10 @@ def run_chunks(run_dir: Path, chunks: list[int]) -> None:
             target_server.stop()
             target_server = ManagedServer(process=None, log_path=None)
 
-        records = load_records(PROJECT_ROOT, DATASET_DIR, TARGETS, DATASET_PATHS)
+        target_rows: dict[str, dict[str, Any]] = {}
+        for chunk_index in chunks:
+            target_rows.update(successful_target_rows(target_results_path(run_dir, chunk_index)))
+        apply_target_rows_to_records(records, target_rows)
         selected_records = records_for_chunks(records, manifest_rows, chunks)
         validate_target_responses(selected_records)
 
@@ -733,7 +764,7 @@ def run_chunks(run_dir: Path, chunks: list[int]) -> None:
                 annotation_guide,
                 stage=f"chunk-{chunk_index:03d}",
                 checkpoint_path=checkpoint_path,
-                persist_to_dataset=True,
+                persist_to_dataset=False,
                 completed_rows=completed,
             )
         summary = progress_summary(run_dir, manifest_rows)
@@ -883,11 +914,11 @@ def ensure_benchmark_label_csv(
     target_model_name: str,
     dataset_paths: dict[str, str] | None = None,
 ) -> Path:
-    """Create or refresh the response-specific benchmark CSV while preserving valid manual labels."""
+    """Create the response-specific benchmark CSV if it does not already exist."""
     benchmark_path = default_benchmark_path(PROJECT_ROOT, dataset_dir, target_model_name)
-    fresh_rows = load_benchmark_rows(PROJECT_ROOT, dataset_dir, target_model_name, dataset_paths or DATASET_PATHS)
     if benchmark_path.exists():
-        fresh_rows = merge_existing_benchmark_labels(fresh_rows, read_benchmark_csv(benchmark_path))
+        return benchmark_path
+    fresh_rows = load_benchmark_rows(PROJECT_ROOT, dataset_dir, target_model_name, dataset_paths or DATASET_PATHS)
     write_benchmark_csv(benchmark_path, fresh_rows)
     return benchmark_path
 
@@ -941,10 +972,11 @@ def build_final_results() -> None:
     if benchmark_path.exists():
         try:
             human_labelled_records = apply_benchmark_labels(records, read_benchmark_csv(benchmark_path))
-        except ValueError:
-            print(f"Full benchmark labels are not complete yet: {benchmark_path}")
-            print("Certification will use the small human calibration CSV for now.")
-            print("For Type I/II paper experiments later, complete the benchmark CSV and choose 3 again.")
+        except ValueError as exc:
+            print(f"Benchmark labels cannot be used for this run: {exc}")
+            print(f"Benchmark file: {benchmark_path}")
+            print("Certification will use human_label_tasks.csv for now.")
+            print("Type I/II paper experiments require completed benchmark labels for this exact run.")
         else:
             human_gold_records = selected_benchmark_human_gold_records(
                 human_labelled_records,
@@ -1086,9 +1118,17 @@ def run_paper_style_experiments(run_dir: Path | None = None) -> None:
         checkpoint_path=output_dir / "type_i_type_ii_checkpoint.csv",
         progress_interval=ERROR_EXPERIMENT_PROGRESS_INTERVAL,
     )
+    calibration_rows = run_calibration_stability(
+        records=records,
+        targets=TARGETS,
+        n_m_values=N_M_GRID,
+        repeats=ERROR_EXPERIMENT_REPEATS,
+        seed=MONTE_CARLO_SEED,
+    )
     write_error_experiment_artifacts(
         output_dir=output_dir,
         type_error_rows=type_error_rows,
+        calibration_rows=calibration_rows,
         main_n_m=N_M,
         main_n_j=n_j_for_experiments,
     )

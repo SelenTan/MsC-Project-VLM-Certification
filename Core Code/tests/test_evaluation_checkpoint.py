@@ -85,6 +85,27 @@ class EvaluationCheckpointTest(unittest.TestCase):
 
             self.assertFalse((run_dir / "monte_carlo_repeats.csv").exists())
 
+    def test_archive_skips_snapshot_copy_when_source_is_existing_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            run_dir = project_root / "runs" / "test-run"
+            snapshot_qa_dir = run_dir / "dataset_snapshot" / "charts" / "qa"
+            snapshot_qa_dir.mkdir(parents=True)
+            qa_path = snapshot_qa_dir / "charts_0000.json"
+            qa_path.write_text('{"items": []}', encoding="utf-8")
+
+            artifacts.export_run_artifacts(
+                project_root=project_root,
+                dataset_dir="Large Dataset",
+                run_dir=run_dir,
+                reliability_rows=[],
+                monte_carlo_rows=[],
+                certificate_rows=[],
+                dataset_paths={"Large Dataset": str(run_dir / "dataset_snapshot")},
+            )
+
+            self.assertTrue(qa_path.exists())
+
     def test_target_response_is_checkpointed_once_per_item(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dataset_dir = Path(temp_dir)
@@ -137,6 +158,70 @@ class EvaluationCheckpointTest(unittest.TestCase):
             self.assertEqual(processed, 1)
             self.assertEqual(write_mock.call_count, 1)
 
+    def test_target_record_resolves_external_large_dataset_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            external_root = Path(temp_dir) / "datasets" / "Large_Dataset"
+            image_path = external_root / "charts" / "images" / "charts_0000.jpg"
+            qa_path = external_root / "charts" / "qa" / "charts_0000.json"
+            image_path.parent.mkdir(parents=True)
+            qa_path.parent.mkdir(parents=True)
+            image_path.write_bytes(b"image")
+            qa_path.write_text(
+                json.dumps(
+                    {
+                        "image_path": "Large Dataset/charts/images/charts_0000.jpg",
+                        "items": [
+                            {
+                                "item_id": "charts_0000_001",
+                                "target": "visual_factuality",
+                                "prompt": "What is shown?",
+                                "target_model_response": None,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            record = {
+                "dataset_dir": "Large Dataset",
+                "qa_json_path": "Large Dataset/charts/qa/charts_0000.json",
+                "qa_json_abs_path": str(qa_path),
+                "item_index": 0,
+                "item_id": "charts_0000_001",
+                "image_id": "charts_0000",
+                "image_type": "charts",
+                "target": "visual_factuality",
+                "prompt": "What is shown?",
+                "image_path": "Large Dataset/charts/images/charts_0000.jpg",
+                "variant_image_paths": "[]",
+                "target_model_response": None,
+            }
+            args = SimpleNamespace(
+                dataset_dir="Large Dataset",
+                dataset_paths={"Large Dataset": str(external_root)},
+                port=8000,
+                api_key_env="UNSET_TEST_KEY",
+                model="test-model",
+                max_tokens=10,
+                temperature=0.0,
+                timeout=1,
+                overwrite=False,
+                progress_interval=1,
+                dry_run=False,
+            )
+            rows = []
+
+            with (
+                patch.object(run_target_vlm, "build_payload", return_value={}),
+                patch.object(run_target_vlm, "call_vlm", return_value="answer"),
+            ):
+                processed = run_target_vlm.run_records(args, [record], {}, rows.append)
+
+            self.assertEqual(processed, 1)
+            self.assertEqual(rows[0]["target_model_response"], "answer")
+            saved = json.loads(qa_path.read_text(encoding="utf-8"))
+            self.assertIsNone(saved["items"][0]["target_model_response"])
+
     def test_server_rejects_an_existing_endpoint_with_the_wrong_model(self) -> None:
         with patch.object(model_server, "endpoint_model_ids", return_value={"wrong-model"}):
             with self.assertRaisesRegex(model_server.ModelServerError, "not required model"):
@@ -162,7 +247,7 @@ class EvaluationCheckpointTest(unittest.TestCase):
             with (
                 patch.object(model_server, "endpoint_model_ids", return_value=None),
                 patch.object(model_server.shutil, "which", return_value="/bin/vllm"),
-                patch.object(model_server.subprocess, "Popen", return_value=process),
+                patch.object(model_server.subprocess, "Popen", return_value=process) as popen_mock,
                 patch.object(model_server, "wait_for_endpoint", side_effect=RuntimeError("startup failed")),
             ):
                 with self.assertRaisesRegex(RuntimeError, "startup failed"):
@@ -180,6 +265,8 @@ class EvaluationCheckpointTest(unittest.TestCase):
                         extra_args=(),
                         wait_timeout_seconds=1,
                     )
+                popen_kwargs = popen_mock.call_args.kwargs
+                self.assertEqual(popen_kwargs["env"]["HF_HUB_DISABLE_XET"], "1")
 
         process.terminate.assert_called_once()
         process.wait.assert_called_once_with(timeout=30)
@@ -405,7 +492,7 @@ class EvaluationCheckpointTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not in manifest"):
             workflow_state.parse_chunk_selection("0,9", available_chunks=range(3))
 
-    def test_collect_chunk_results_reports_missing_and_conflicting_rows(self) -> None:
+    def test_collect_chunk_results_reports_missing_and_uses_latest_successful_row(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             run_dir = Path(temp_dir)
             manifest_rows = [
@@ -440,14 +527,14 @@ class EvaluationCheckpointTest(unittest.TestCase):
                     "target_error": None,
                 },
             )
-            with self.assertRaisesRegex(ValueError, "Conflicting"):
-                workflow_state.collect_chunk_results(
-                    run_dir,
-                    manifest_rows,
-                    workflow_state.TARGET_RESULTS_FILE,
-                    value_field="target_model_response",
-                    error_field="target_error",
-                )
+            collected = workflow_state.collect_chunk_results(
+                run_dir,
+                manifest_rows,
+                workflow_state.TARGET_RESULTS_FILE,
+                value_field="target_model_response",
+                error_field="target_error",
+            )
+            self.assertEqual(collected["key-1"]["target_model_response"], "different answer")
 
     def test_run_metadata_is_consolidated_into_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -469,6 +556,55 @@ class EvaluationCheckpointTest(unittest.TestCase):
             self.assertEqual(workflow_state.load_run_status(run_dir)["status"], "created")
             self.assertEqual(workflow_state.load_human_gold_keys(run_dir), {"key-1"})
             self.assertEqual(workflow_state.load_local_chunks(run_dir), [0])
+
+    def test_completed_run_without_manifest_is_recoverable_from_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            run_dir = project_root / "runs" / "test-run"
+            snapshot_qa_dir = run_dir / "dataset_snapshot" / "charts" / "qa"
+            snapshot_qa_dir.mkdir(parents=True)
+            (run_dir / "run_config.json").write_text(
+                json.dumps(
+                    {
+                        "run_name": "test-run",
+                        "dataset_dir": "Large Dataset",
+                        "chunk_size": 1000,
+                        "status": "completed",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (snapshot_qa_dir / "charts_0000.json").write_text(
+                json.dumps(
+                    {
+                        "image_id": "charts_0000",
+                        "image_type": "charts",
+                        "image_path": "Large Dataset/charts/images/charts_0000.jpg",
+                        "items": [
+                            {
+                                "item_id": "charts_0000_001",
+                                "image_id": "charts_0000",
+                                "image_type": "charts",
+                                "target": "visual_factuality",
+                                "prompt": "What is shown?",
+                                "expected_evidence": "visible",
+                                "expected_answer_or_behavior": "42",
+                                "target_model_response": "42",
+                                "judge_label": 0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(main, "PROJECT_ROOT", project_root), patch.object(main, "RUNS_DIR", "runs"):
+                self.assertEqual(main.run_dirs(), [run_dir])
+                main.ensure_run_manifest(run_dir)
+
+            self.assertFalse((run_dir / "chunks").exists())
+            self.assertTrue((run_dir / "manifest.jsonl").exists())
+            self.assertEqual(workflow_state.load_manifest(run_dir)[0]["item_id"], "charts_0000_001")
 
     def test_effective_n_j_is_capped_by_evaluation_pool(self) -> None:
         records = (
@@ -516,12 +652,19 @@ class EvaluationCheckpointTest(unittest.TestCase):
             target_path.parent.mkdir(parents=True)
             target_path.write_text('{"record_key": "key-1"}\n', encoding="utf-8")
             judge_path.write_text('{"record_key": "key-1"}\n', encoding="utf-8")
+            manifest_path = run_dir / workflow_state.MANIFEST_FILE
+            manifest_path.write_text('{"record_key": "key-1", "chunk_index": 0}\n', encoding="utf-8")
+            archived_manifest_path = run_dir / workflow_state.LEGACY_MANIFEST_FILE
 
             deleted = workflow_state.delete_chunk_checkpoints(run_dir)
 
             self.assertEqual(deleted, 2)
             self.assertFalse(target_path.exists())
             self.assertFalse(judge_path.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertFalse((run_dir / "chunks").exists())
+            self.assertTrue(archived_manifest_path.exists())
+            self.assertEqual(workflow_state.load_manifest(run_dir)[0]["record_key"], "key-1")
 
 
 if __name__ == "__main__":

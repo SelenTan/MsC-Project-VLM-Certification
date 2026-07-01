@@ -16,8 +16,8 @@ from urllib import error, request
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
-from artifacts import record_key, update_item_fields  # noqa: E402
-from dataset_selection import select_dataset_dir  # noqa: E402
+from artifacts import record_key  # noqa: E402
+from dataset_selection import resolve_dataset_path, resolve_dataset_reference, select_dataset_dir  # noqa: E402
 from model_server import ManagedServer, auto_select_gpus, start_vllm_server  # noqa: E402
 
 TARGET_ORDER = ("visual_factuality", "robustness", "refusal_behavior")
@@ -129,10 +129,17 @@ def image_data_url(image_path: Path) -> str:
     return f"data:{mime_type};base64,{encoded}"
 
 
-def item_image_path(dataset_record: dict[str, Any], item: dict[str, Any]) -> Path:
+def item_image_path(
+    dataset_record: dict[str, Any],
+    item: dict[str, Any],
+    dataset_dir: str,
+    dataset_paths: dict[str, str] | None = None,
+) -> Path:
     if item.get("target") == "robustness" and item.get("variant_image_paths"):
-        return project_path(item["variant_image_paths"][0])
-    return project_path(item.get("image_path") or dataset_record["image_path"])
+        path_text = item["variant_image_paths"][0]
+    else:
+        path_text = item.get("image_path") or dataset_record["image_path"]
+    return resolve_dataset_reference(PROJECT_ROOT, dataset_dir, path_text, dataset_paths)
 
 
 def build_payload(
@@ -197,12 +204,15 @@ def call_vlm(
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def run_dataset(args: argparse.Namespace) -> int:
     """Process QA files, call the local VLM for selected items, and persist responses after each item."""
-    dataset_dir = project_path(args.dataset_dir)
+    dataset_paths = getattr(args, "dataset_paths", None)
+    dataset_dir = resolve_dataset_path(PROJECT_ROOT, args.dataset_dir, dataset_paths)
     if not dataset_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
 
@@ -222,7 +232,7 @@ def run_dataset(args: argparse.Namespace) -> int:
             if args.limit is not None and processed >= args.limit:
                 return processed
 
-            image_path = item_image_path(data, item)
+            image_path = item_image_path(data, item, args.dataset_dir, dataset_paths)
             if not image_path.exists():
                 raise FileNotFoundError(f"Image not found for {item.get('item_id')}: {image_path}")
 
@@ -265,10 +275,7 @@ def run_records(
     for index, record in enumerate(records, start=1):
         key = record_key(record)
         if key in completed_rows:
-            update_item_fields(
-                record,
-                {"target_model_response": completed_rows[key]["target_model_response"]},
-            )
+            record["target_model_response"] = completed_rows[key]["target_model_response"]
             continue
         if record.get("target_model_response") and not args.overwrite:
             append_result(
@@ -287,6 +294,7 @@ def run_records(
             completed_rows[key] = {"target_model_response": record["target_model_response"]}
             continue
 
+        dataset_paths = getattr(args, "dataset_paths", None)
         image_path = item_image_path(
             {"image_path": record["image_path"]},
             {
@@ -294,6 +302,8 @@ def run_records(
                 "image_path": record["image_path"],
                 "variant_image_paths": json.loads(record.get("variant_image_paths") or "[]"),
             },
+            record.get("dataset_dir") or args.dataset_dir,
+            dataset_paths,
         )
         if not image_path.exists():
             failure_row = {
@@ -343,7 +353,7 @@ def run_records(
             )
             raise
 
-        update_item_fields(record, {"target_model_response": response_text})
+        record["target_model_response"] = response_text
         row = {
             "record_key": key,
             "item_id": record["item_id"],

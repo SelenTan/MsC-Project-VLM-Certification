@@ -12,6 +12,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "vlm_evaluation"))
 from error_experiments import (  # noqa: E402
     METHODS,
     PPI_VARIANTS,
+    combined_type_error_value,
+    make_error_experiment_charts,
     ppi_decision,
     run_calibration_stability,
     run_type_error_experiment,
@@ -109,6 +111,42 @@ class ErrorExperimentTest(unittest.TestCase):
             result = ppi_decision(d_m, d_j, alpha=0.5, zeta=0.05, variant=variant, ridge_penalty=0.01)
             self.assertIn(result["reject"], {True, False})
             self.assertIn("ppi_weight", result)
+
+    def test_combined_plot_uses_type_i_left_and_type_ii_right_of_true_rate(self) -> None:
+        left = {"alpha": 0.2, "true_failure_rate": 0.3, "type_i_error": 0.04, "type_ii_error": None}
+        right = {"alpha": 0.4, "true_failure_rate": 0.3, "type_i_error": None, "type_ii_error": 0.7}
+
+        self.assertEqual(combined_type_error_value(left), 0.04)
+        self.assertEqual(combined_type_error_value(right), 0.7)
+
+    def test_paper_style_charts_write_one_combined_figure_per_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rows = run_type_error_experiment(
+                records=make_records(),
+                targets=("visual_factuality",),
+                alpha_values=[0.25, 0.50],
+                n_m_values=(8,),
+                n_j=10,
+                repeats=3,
+                zeta=0.05,
+                seed=1,
+                ridge_penalty=0.01,
+            )
+            calibration_rows = run_calibration_stability(
+                records=make_records(),
+                targets=("visual_factuality",),
+                n_m_values=(8,),
+                repeats=3,
+                seed=2,
+            )
+
+            try:
+                make_error_experiment_charts(Path(temp_dir), rows, calibration_rows, main_n_m=8, main_n_j=10)
+            except RuntimeError as exc:
+                self.skipTest(str(exc))
+
+            self.assertTrue((Path(temp_dir) / "type_i_type_ii_by_alpha_visual_factuality.png").exists())
+            self.assertTrue((Path(temp_dir) / "calibration_stability_by_n_m.png").exists())
 
 
 if __name__ == "__main__":
