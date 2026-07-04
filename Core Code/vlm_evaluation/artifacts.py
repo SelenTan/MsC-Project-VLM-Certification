@@ -19,6 +19,10 @@ from normalization import build_checker_reference_fields
 VARIABLE_FIELDS = ("target_model_response", "human_label", "judge_label", "failure_reason")
 
 
+def display_target_name(target: str) -> str:
+    return target.replace("_", " ")
+
+
 def project_path(project_root: Path, path_text: str) -> Path:
     path = Path(path_text)
     if path.is_absolute():
@@ -473,7 +477,7 @@ def make_charts(run_dir: Path, reliability_rows: list[dict[str, Any]], certifica
     tpr_values = [row["TPR"] if row["TPR"] is not None else 0 for row in reliability_rows]
     fpr_values = [row["FPR"] if row["FPR"] is not None else 0 for row in reliability_rows]
     reliability_labels = [
-        f"{row['target']}\nM1={row['n_M1']}, M0={row['n_M0']}" for row in reliability_rows
+        f"{display_target_name(row['target'])}\nM1={row['n_M1']}, M0={row['n_M0']}" for row in reliability_rows
     ]
 
     plt.figure(figsize=(8, 4))
@@ -491,9 +495,9 @@ def make_charts(run_dir: Path, reliability_rows: list[dict[str, Any]], certifica
     alpha_values = [row["alpha_median"] if row["alpha_median"] is not None else 0 for row in certificate_rows]
     if certificate_rows:
         certificate_labels = [
-            f"{row['target']}\ncert={row['certified_rate']:.2f}"
+            f"{display_target_name(row['target'])}\ncert={row['certified_rate']:.2f}"
             if row.get("certified_rate") is not None
-            else row["target"]
+            else display_target_name(row["target"])
             for row in certificate_rows
         ]
         plt.figure(figsize=(8, 4))
@@ -514,7 +518,7 @@ def make_charts(run_dir: Path, reliability_rows: list[dict[str, Any]], certifica
             if row["target"] == target and row.get("certifiable_alpha") is not None
         ]
         if alphas:
-            plt.hist(alphas, bins=20, alpha=0.45, label=target)
+            plt.hist(alphas, bins=20, alpha=0.45, label=display_target_name(target))
             histogram_written = True
     if histogram_written:
         plt.xlabel("Certifiable alpha")

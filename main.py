@@ -49,6 +49,7 @@ from certification import alpha_grid, estimate_reliability, run_monte_carlo, sum
 from dataset_selection import select_dataset_dir
 from error_experiments import (
     run_calibration_stability,
+    run_noisy_type_ii_by_n_m,
     run_type_error_experiment,
     write_error_experiment_artifacts,
 )
@@ -98,23 +99,22 @@ TARGET_CUDA_VISIBLE_DEVICES = None
 TARGET_GPU_MEMORY_UTILIZATION = 0.7
 TARGET_LIMIT = None
 TARGET_LIMIT_MM_PER_PROMPT = '{"image":2,"video":0}'
-TARGET_MAX_GPUS = 2
-TARGET_MAX_MODEL_LEN = 8192
+TARGET_MAX_GPUS = 1
+TARGET_MAX_MODEL_LEN = 32768
 TARGET_MAX_TOKENS = 160
-TARGET_MIN_FREE_MEMORY_MB = 40000
+TARGET_MIN_FREE_MEMORY_MB = 20000
 TARGET_MM_ENCODER_TP_MODE = None
-TARGET_MODEL_NAME = "mistralai/Pixtral-12B-2409"
+TARGET_MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
 TARGET_OVERWRITE_RESPONSES = False
 TARGET_PORT = 8000
 TARGET_PROGRESS_INTERVAL = 25
-TARGET_REQUIRED_BALANCED_MEMORY_MB = 40000
+TARGET_REQUIRED_BALANCED_MEMORY_MB = 20000
 TARGET_SERVER_WAIT_TIMEOUT_SECONDS = 3600
 TARGET_TEMPERATURE = 0.0
 TARGET_TENSOR_PARALLEL_SIZE = None
 TARGET_TIMEOUT_SECONDS = 180
 TARGET_VLLM_EXTRA_ARGS = (
     "--dtype", "float16",
-    "--tokenizer-mode", "mistral",
 )
 
 # Automatic local checker deployment
@@ -127,7 +127,7 @@ CHECKER_LIMIT_MM_PER_PROMPT = None
 CHECKER_MAX_MODEL_LEN = 8192
 CHECKER_MIN_FREE_MEMORY_MB = 20000
 CHECKER_MM_ENCODER_TP_MODE = None
-CHECKER_MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
+CHECKER_MODEL_NAME = "Qwen/Qwen2.5-14B-Instruct"
 CHECKER_NUM_GPUS = 1
 CHECKER_PORT = 8001
 CHECKER_INTERNAL_ENDPOINT = f"http://localhost:{CHECKER_PORT}/v1/chat/completions"
@@ -145,6 +145,11 @@ HUMAN_GOLD_EXPANSION_PER_TARGET = 50
 HUMAN_GOLD_MAX_PER_TARGET = 1000
 N_M = 50
 N_M_GRID = (25, 50, 100)
+N_M_SWEEP_MIN = 5
+N_M_SWEEP_MAX = 1000
+N_M_SWEEP_STEP = 5
+N_M_SWEEP_REPEATS = 1000
+TYPE_II_SWEEP_ALPHA_MARGIN = 0.10
 N_J = 1000
 
 # Random seeds
@@ -224,6 +229,11 @@ def current_config(run_name: str) -> dict[str, Any]:
         "n_m": N_M,
         "n_j": N_J,
         "n_m_grid": N_M_GRID,
+        "n_m_sweep_min": N_M_SWEEP_MIN,
+        "n_m_sweep_max": N_M_SWEEP_MAX,
+        "n_m_sweep_step": N_M_SWEEP_STEP,
+        "n_m_sweep_repeats": N_M_SWEEP_REPEATS,
+        "type_ii_sweep_alpha_margin": TYPE_II_SWEEP_ALPHA_MARGIN,
         "human_gold_sample_seed": HUMAN_GOLD_SAMPLE_SEED,
         "monte_carlo_seed": MONTE_CARLO_SEED,
         "repeats": B,
@@ -1102,9 +1112,11 @@ def run_paper_style_experiments(run_dir: Path | None = None) -> None:
     if missing_judge_labels:
         examples = ", ".join(missing_judge_labels[:10])
         raise ValueError(f"{len(missing_judge_labels)} judge labels are missing from the saved dataset. Examples: {examples}")
-    records = apply_benchmark_labels(records, read_benchmark_csv(benchmark_path))
+    benchmark_rows = read_benchmark_csv(benchmark_path)
+    records = apply_benchmark_labels(records, benchmark_rows)
     output_dir = run_dir / "error_experiments"
     n_j_for_experiments = effective_n_j(records)
+    type_error_csv_path = output_dir / "type_i_type_ii_by_alpha.csv"
     type_error_rows = run_type_error_experiment(
         records=records,
         targets=TARGETS,
@@ -1115,7 +1127,19 @@ def run_paper_style_experiments(run_dir: Path | None = None) -> None:
         zeta=ZETA,
         seed=MONTE_CARLO_SEED,
         ridge_penalty=PPI_RIDGE_PENALTY,
-        checkpoint_path=output_dir / "type_i_type_ii_checkpoint.csv",
+        checkpoint_path=type_error_csv_path,
+        progress_interval=ERROR_EXPERIMENT_PROGRESS_INTERVAL,
+    )
+    n_m_sweep_values = tuple(range(N_M_SWEEP_MIN, N_M_SWEEP_MAX + 1, N_M_SWEEP_STEP))
+    type_ii_by_n_m_rows = run_noisy_type_ii_by_n_m(
+        records=records,
+        targets=TARGETS,
+        n_m_values=n_m_sweep_values,
+        n_j=n_j_for_experiments,
+        repeats=N_M_SWEEP_REPEATS,
+        zeta=ZETA,
+        seed=MONTE_CARLO_SEED,
+        alpha_margin=TYPE_II_SWEEP_ALPHA_MARGIN,
         progress_interval=ERROR_EXPERIMENT_PROGRESS_INTERVAL,
     )
     calibration_rows = run_calibration_stability(
@@ -1129,8 +1153,11 @@ def run_paper_style_experiments(run_dir: Path | None = None) -> None:
         output_dir=output_dir,
         type_error_rows=type_error_rows,
         calibration_rows=calibration_rows,
+        type_ii_by_n_m_rows=type_ii_by_n_m_rows,
         main_n_m=N_M,
         main_n_j=n_j_for_experiments,
+        fixed_alpha=ERROR_EXPERIMENT_ALPHA,
+        human_label_rows=benchmark_rows,
     )
     print(f"Paper-style error experiments saved under {output_dir}")
 
