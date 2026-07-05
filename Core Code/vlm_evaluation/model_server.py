@@ -40,14 +40,23 @@ class ManagedServer:
             self.process.wait(timeout=30)
 
 
-def auto_select_gpus(required_count: int, min_free_memory_mb: int) -> str:
+def auto_select_gpus(
+    required_count: int,
+    min_free_memory_mb: int,
+    required_free_fraction: Optional[float] = None,
+) -> str:
     """Select the GPUs with the most free memory using nvidia-smi, or fail if not enough are available."""
-    candidates = query_free_gpus(min_free_memory_mb)
+    candidates = query_usable_gpus(min_free_memory_mb, required_free_fraction)
     if len(candidates) < required_count:
         available = ", ".join(f"gpu{index}:{free_memory}MB" for index, free_memory in candidates) or "none"
+        utilization_text = (
+            f" and enough free memory for gpu_memory_utilization={required_free_fraction}"
+            if required_free_fraction is not None
+            else ""
+        )
         raise ModelServerError(
             f"Need {required_count} GPU(s) with at least {min_free_memory_mb}MB free each, "
-            f"but only found: {available}"
+            f"a working PyTorch CUDA runtime{utilization_text}, but only found: {available}"
         )
     selected = sorted(index for index, _ in candidates[:required_count])
     return ",".join(str(index) for index in selected)
@@ -57,9 +66,10 @@ def auto_select_gpus_by_balanced_memory(
     max_gpu_count: int,
     required_balanced_memory_mb: int,
     min_free_memory_mb: int,
+    required_free_fraction: Optional[float] = None,
 ) -> str:
     """Select the smallest GPU set whose TP-balanced usable memory meets the target requirement."""
-    candidates = query_free_gpus(min_free_memory_mb)
+    candidates = query_usable_gpus(min_free_memory_mb, required_free_fraction)
     for gpu_count in range(1, max_gpu_count + 1):
         if len(candidates) < gpu_count:
             break
@@ -74,14 +84,40 @@ def auto_select_gpus_by_balanced_memory(
     raise ModelServerError(
         f"Could not satisfy balanced GPU memory requirement. Need at least "
         f"{required_balanced_memory_mb}MB balanced usable memory across up to {max_gpu_count} GPU(s), "
-        f"with each selected GPU above {min_free_memory_mb}MB free. Available: {available}"
+        f"with each selected GPU above {min_free_memory_mb}MB free and CUDA-runtime usable. Available: {available}"
     )
 
 
-def query_free_gpus(min_free_memory_mb: int) -> list[tuple[int, int]]:
+def query_usable_gpus(
+    min_free_memory_mb: int,
+    required_free_fraction: Optional[float] = None,
+) -> list[tuple[int, int]]:
+    """Return free-memory GPU candidates after removing devices PyTorch cannot initialize."""
+    usable: list[tuple[int, int]] = []
+    failed: list[str] = []
+    for index, free_memory_mb, total_memory_mb in query_gpu_memory(min_free_memory_mb):
+        if required_free_fraction is not None and free_memory_mb < total_memory_mb * required_free_fraction:
+            continue
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = str(index)
+        error_text = cuda_runtime_error(env, str(index))
+        if error_text is None:
+            usable.append((index, free_memory_mb))
+        else:
+            failed.append(f"gpu{index}:{free_memory_mb}MB")
+    if not usable and failed:
+        raise ModelServerError(
+            "nvidia-smi reports free GPUs, but PyTorch cannot initialize CUDA on them: "
+            + ", ".join(failed)
+        )
+    return usable
+
+
+def query_gpu_memory(min_free_memory_mb: int) -> list[tuple[int, int, int]]:
+    """Return GPUs with enough free memory as (index, free MB, total MB), sorted by free memory."""
     command = [
         "nvidia-smi",
-        "--query-gpu=index,memory.free",
+        "--query-gpu=index,memory.free,memory.total",
         "--format=csv,noheader,nounits",
     ]
     try:
@@ -89,18 +125,23 @@ def query_free_gpus(min_free_memory_mb: int) -> list[tuple[int, int]]:
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise ModelServerError("Could not run nvidia-smi for GPU auto-selection.") from exc
 
-    candidates: list[tuple[int, int]] = []
+    candidates: list[tuple[int, int, int]] = []
     for line in result.stdout.splitlines():
         if not line.strip():
             continue
-        index_text, free_memory_text = [part.strip() for part in line.split(",", maxsplit=1)]
+        index_text, free_memory_text, total_memory_text = [part.strip() for part in line.split(",", maxsplit=2)]
         index = int(index_text)
         free_memory_mb = int(free_memory_text)
+        total_memory_mb = int(total_memory_text)
         if free_memory_mb >= min_free_memory_mb:
-            candidates.append((index, free_memory_mb))
+            candidates.append((index, free_memory_mb, total_memory_mb))
 
     candidates.sort(key=lambda item: item[1], reverse=True)
     return candidates
+
+
+def query_free_gpus(min_free_memory_mb: int) -> list[tuple[int, int]]:
+    return [(index, free_memory_mb) for index, free_memory_mb, _ in query_gpu_memory(min_free_memory_mb)]
 
 
 def endpoint_base(endpoint: str) -> str:
@@ -173,6 +214,93 @@ def tail_log(path: Path, max_lines: int = 80) -> str:
     return "\n".join(lines[-max_lines:]) or "<log file is empty>"
 
 
+def validate_cuda_runtime(env: dict[str, str], cuda_visible_devices: str) -> None:
+    """Fail before vLLM startup when PyTorch cannot see a usable CUDA runtime."""
+    requested_count = len([device for device in cuda_visible_devices.split(",") if device.strip()]) if cuda_visible_devices else None
+    error_text = cuda_runtime_error(env, cuda_visible_devices)
+    if error_text is not None:
+        raise ModelServerError(
+            "CUDA is not available to PyTorch in this session, so vLLM cannot start. "
+            "Run on a GPU node/session and check nvidia-smi before starting the workflow."
+            + (f"\nCUDA_VISIBLE_DEVICES={cuda_visible_devices or '<unset>'}\n{error_text}" if error_text else "")
+        )
+    if requested_count is not None:
+        visible_count = cuda_device_count(env)
+        if visible_count < requested_count:
+            raise ModelServerError(
+                f"CUDA_VISIBLE_DEVICES={cuda_visible_devices} exposes {visible_count} CUDA device(s), "
+                f"but {requested_count} were requested."
+            )
+
+
+def validate_gpu_memory_request(cuda_visible_devices: str, gpu_memory_utilization: Optional[float]) -> None:
+    """Fail before vLLM startup when selected GPUs cannot satisfy the requested memory reservation."""
+    if gpu_memory_utilization is None or not cuda_visible_devices:
+        return
+    requested_devices = [int(device.strip()) for device in cuda_visible_devices.split(",") if device.strip()]
+    memory_by_index = {index: (free_mb, total_mb) for index, free_mb, total_mb in query_gpu_memory(0)}
+    insufficient: list[str] = []
+    missing: list[int] = []
+    for index in requested_devices:
+        memory = memory_by_index.get(index)
+        if memory is None:
+            missing.append(index)
+            continue
+        free_mb, total_mb = memory
+        required_mb = total_mb * gpu_memory_utilization
+        if free_mb < required_mb:
+            insufficient.append(f"gpu{index}: {free_mb}MB free, needs {required_mb:.0f}MB")
+    if missing:
+        raise ModelServerError(f"Selected GPU(s) not found by nvidia-smi: {', '.join(map(str, missing))}")
+    if insufficient:
+        raise ModelServerError(
+            "Selected GPU(s) do not have enough free memory for "
+            f"gpu_memory_utilization={gpu_memory_utilization}: "
+            + "; ".join(insufficient)
+        )
+
+
+def cuda_runtime_error(env: dict[str, str], cuda_visible_devices: str) -> Optional[str]:
+    """Return a short CUDA initialization error, or None when PyTorch can use CUDA."""
+    script = """
+import sys
+try:
+    import torch
+except Exception as exc:
+    print(f"Could not import torch: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+if not torch.cuda.is_available():
+    print("torch.cuda.is_available() is False.", file=sys.stderr)
+    raise SystemExit(3)
+device_count = torch.cuda.device_count()
+print(f"torch CUDA device_count={device_count}")
+if device_count:
+    print(f"first CUDA device={torch.cuda.get_device_name(0)}")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+    return None
+
+
+def cuda_device_count(env: dict[str, str]) -> int:
+    script = "import torch\nprint(torch.cuda.device_count())\n"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return int(result.stdout.strip() or "0") if result.returncode == 0 else 0
+
+
 def start_vllm_server(
     endpoint: str,
     model: str,
@@ -233,6 +361,8 @@ def start_vllm_server(
     env["HF_HUB_DISABLE_XET"] = "1"
     if cuda_visible_devices:
         env["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
+    validate_cuda_runtime(env, cuda_visible_devices)
+    validate_gpu_memory_request(cuda_visible_devices, gpu_memory_utilization)
 
     log_file = log_path.open("ab")
     process: Optional[subprocess.Popen[bytes]] = None

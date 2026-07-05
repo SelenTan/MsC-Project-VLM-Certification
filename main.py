@@ -145,9 +145,16 @@ HUMAN_GOLD_EXPANSION_PER_TARGET = 50
 HUMAN_GOLD_MAX_PER_TARGET = 1000
 N_M = 50
 N_M_GRID = (25, 50, 100)
+N_M_CALIBRATION_SWEEP_MIN = 5
+N_M_CALIBRATION_SWEEP_MAX = 1000
+N_M_CALIBRATION_SWEEP_STEP = 25
 N_M_SWEEP_MIN = 5
-N_M_SWEEP_MAX = 1000
-N_M_SWEEP_STEP = 5
+N_M_SWEEP_DENSE_MAX = 100
+N_M_SWEEP_DENSE_STEP = 5
+N_M_SWEEP_MID_MAX = 1000
+N_M_SWEEP_MID_STEP = 50
+N_M_SWEEP_HIGH_MAX = 10000
+N_M_SWEEP_HIGH_STEP = 250
 N_M_SWEEP_REPEATS = 1000
 TYPE_II_SWEEP_ALPHA_MARGIN = 0.10
 N_J = 1000
@@ -229,9 +236,17 @@ def current_config(run_name: str) -> dict[str, Any]:
         "n_m": N_M,
         "n_j": N_J,
         "n_m_grid": N_M_GRID,
+        "n_m_calibration_sweep_min": N_M_CALIBRATION_SWEEP_MIN,
+        "n_m_calibration_sweep_max": N_M_CALIBRATION_SWEEP_MAX,
+        "n_m_calibration_sweep_step": N_M_CALIBRATION_SWEEP_STEP,
         "n_m_sweep_min": N_M_SWEEP_MIN,
-        "n_m_sweep_max": N_M_SWEEP_MAX,
-        "n_m_sweep_step": N_M_SWEEP_STEP,
+        "n_m_sweep_dense_max": N_M_SWEEP_DENSE_MAX,
+        "n_m_sweep_dense_step": N_M_SWEEP_DENSE_STEP,
+        "n_m_sweep_mid_max": N_M_SWEEP_MID_MAX,
+        "n_m_sweep_mid_step": N_M_SWEEP_MID_STEP,
+        "n_m_sweep_max": N_M_SWEEP_HIGH_MAX,
+        "n_m_sweep_high_max": N_M_SWEEP_HIGH_MAX,
+        "n_m_sweep_high_step": N_M_SWEEP_HIGH_STEP,
         "n_m_sweep_repeats": N_M_SWEEP_REPEATS,
         "type_ii_sweep_alpha_margin": TYPE_II_SWEEP_ALPHA_MARGIN,
         "human_gold_sample_seed": HUMAN_GOLD_SAMPLE_SEED,
@@ -274,6 +289,19 @@ def configured_human_gold_per_target() -> int:
     return HUMAN_GOLD_PER_TARGET
 
 
+def n_m_sweep_values() -> tuple[int, ...]:
+    """Build a dense-low/coarse-high calibration sweep so the Type II trend is visible without thousands of points."""
+    values = set(range(N_M_SWEEP_MIN, N_M_SWEEP_DENSE_MAX + 1, N_M_SWEEP_DENSE_STEP))
+    values.update(range(N_M_SWEEP_DENSE_MAX + N_M_SWEEP_MID_STEP, N_M_SWEEP_MID_MAX + 1, N_M_SWEEP_MID_STEP))
+    values.update(range(N_M_SWEEP_MID_MAX + N_M_SWEEP_HIGH_STEP, N_M_SWEEP_HIGH_MAX + 1, N_M_SWEEP_HIGH_STEP))
+    return tuple(sorted(values))
+
+
+def n_m_calibration_sweep_values() -> tuple[int, ...]:
+    """Build the paper-style TPR/FPR stability sweep; n_M=0 is not estimable."""
+    return tuple(range(N_M_CALIBRATION_SWEEP_MIN, N_M_CALIBRATION_SWEEP_MAX + 1, N_M_CALIBRATION_SWEEP_STEP))
+
+
 def target_internal_endpoint() -> str:
     return f"http://localhost:{TARGET_PORT}/v1/chat/completions"
 
@@ -288,6 +316,7 @@ def maybe_start_target_server(run_dir: Path) -> ManagedServer:
             max_gpu_count=TARGET_MAX_GPUS,
             required_balanced_memory_mb=TARGET_REQUIRED_BALANCED_MEMORY_MB,
             min_free_memory_mb=TARGET_MIN_FREE_MEMORY_MB,
+            required_free_fraction=TARGET_GPU_MEMORY_UTILIZATION,
         )
     tensor_parallel_size = TARGET_TENSOR_PARALLEL_SIZE or len(cuda_visible_devices.split(","))
     print(f"Using CUDA_VISIBLE_DEVICES={cuda_visible_devices}, tensor_parallel_size={tensor_parallel_size}")
@@ -314,7 +343,11 @@ def maybe_start_checker_server(run_dir: Path) -> ManagedServer:
         return ManagedServer(process=None, log_path=None)
     cuda_visible_devices = CHECKER_CUDA_VISIBLE_DEVICES
     if cuda_visible_devices is None:
-        cuda_visible_devices = auto_select_gpus(CHECKER_NUM_GPUS, CHECKER_MIN_FREE_MEMORY_MB)
+        cuda_visible_devices = auto_select_gpus(
+            CHECKER_NUM_GPUS,
+            CHECKER_MIN_FREE_MEMORY_MB,
+            required_free_fraction=CHECKER_GPU_MEMORY_UTILIZATION,
+        )
     print(f"Using CUDA_VISIBLE_DEVICES={cuda_visible_devices}, tensor_parallel_size={CHECKER_TENSOR_PARALLEL_SIZE}")
     return start_vllm_server(
         endpoint=CHECKER_INTERNAL_ENDPOINT,
@@ -1130,11 +1163,10 @@ def run_paper_style_experiments(run_dir: Path | None = None) -> None:
         checkpoint_path=type_error_csv_path,
         progress_interval=ERROR_EXPERIMENT_PROGRESS_INTERVAL,
     )
-    n_m_sweep_values = tuple(range(N_M_SWEEP_MIN, N_M_SWEEP_MAX + 1, N_M_SWEEP_STEP))
     type_ii_by_n_m_rows = run_noisy_type_ii_by_n_m(
         records=records,
         targets=TARGETS,
-        n_m_values=n_m_sweep_values,
+        n_m_values=n_m_sweep_values(),
         n_j=n_j_for_experiments,
         repeats=N_M_SWEEP_REPEATS,
         zeta=ZETA,
@@ -1145,7 +1177,7 @@ def run_paper_style_experiments(run_dir: Path | None = None) -> None:
     calibration_rows = run_calibration_stability(
         records=records,
         targets=TARGETS,
-        n_m_values=N_M_GRID,
+        n_m_values=n_m_calibration_sweep_values(),
         repeats=ERROR_EXPERIMENT_REPEATS,
         seed=MONTE_CARLO_SEED,
     )

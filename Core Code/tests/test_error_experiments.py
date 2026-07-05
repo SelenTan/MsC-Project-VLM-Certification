@@ -222,6 +222,16 @@ class ErrorExperimentTest(unittest.TestCase):
                 seed=1,
                 ridge_penalty=0.01,
             )
+            type_ii_rows = run_noisy_type_ii_by_n_m(
+                records=make_records(),
+                targets=("visual_factuality",),
+                n_m_values=(8,),
+                n_j=10,
+                repeats=3,
+                zeta=0.05,
+                seed=3,
+                alpha_margin=0.10,
+            )
             calibration_rows = run_calibration_stability(
                 records=make_records(),
                 targets=("visual_factuality",),
@@ -231,12 +241,13 @@ class ErrorExperimentTest(unittest.TestCase):
             )
 
             try:
-                make_error_experiment_charts(Path(temp_dir), rows, calibration_rows, [], main_n_m=8, main_n_j=10, fixed_alpha=0.25)
+                make_error_experiment_charts(Path(temp_dir), rows, calibration_rows, type_ii_rows, main_n_m=8, main_n_j=10, fixed_alpha=0.25)
             except RuntimeError as exc:
                 self.skipTest(str(exc))
 
             self.assertTrue((Path(temp_dir) / "type_i_type_ii_by_alpha_visual_factuality.png").exists())
-            self.assertTrue((Path(temp_dir) / "calibration_stability_by_n_m.png").exists())
+            self.assertTrue((Path(temp_dir) / "calibration_stability_by_n_m_visual_factuality.png").exists())
+            self.assertTrue((Path(temp_dir) / "type_ii_error_by_n_m.png").exists())
 
     def test_error_artifacts_keep_final_csv_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -269,7 +280,6 @@ class ErrorExperimentTest(unittest.TestCase):
                 repeats=3,
                 seed=2,
             )
-
             try:
                 write_error_experiment_artifacts(output_dir, rows, calibration_rows, type_ii_rows, 8, 10, 0.25)
             except RuntimeError as exc:

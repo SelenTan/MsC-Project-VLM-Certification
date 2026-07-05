@@ -247,6 +247,7 @@ class EvaluationCheckpointTest(unittest.TestCase):
             with (
                 patch.object(model_server, "endpoint_model_ids", return_value=None),
                 patch.object(model_server.shutil, "which", return_value="/bin/vllm"),
+                patch.object(model_server, "validate_cuda_runtime"),
                 patch.object(model_server.subprocess, "Popen", return_value=process) as popen_mock,
                 patch.object(model_server, "wait_for_endpoint", side_effect=RuntimeError("startup failed")),
             ):
@@ -270,6 +271,49 @@ class EvaluationCheckpointTest(unittest.TestCase):
 
         process.terminate.assert_called_once()
         process.wait.assert_called_once_with(timeout=30)
+
+    def test_server_rejects_missing_cuda_before_vllm_startup(self) -> None:
+        result = MagicMock()
+        result.returncode = 3
+        result.stdout = ""
+        result.stderr = "torch.cuda.is_available() is False."
+        with patch.object(model_server.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(model_server.ModelServerError, "CUDA is not available"):
+                model_server.validate_cuda_runtime({"CUDA_VISIBLE_DEVICES": "0"}, "0")
+
+    def test_auto_select_skips_gpus_with_broken_cuda_runtime(self) -> None:
+        gpu_memory = [(0, 90000, 95000), (2, 88000, 95000), (3, 87000, 95000)]
+
+        def cuda_error(_env: dict[str, str], cuda_visible_devices: str) -> str | None:
+            return None if cuda_visible_devices == "2" else "torch.cuda.is_available() is False."
+
+        with (
+            patch.object(model_server, "query_gpu_memory", return_value=gpu_memory),
+            patch.object(model_server, "cuda_runtime_error", side_effect=cuda_error),
+        ):
+            selected = model_server.auto_select_gpus(required_count=1, min_free_memory_mb=80000)
+
+        self.assertEqual(selected, "2")
+
+    def test_auto_select_skips_gpus_below_vllm_memory_fraction(self) -> None:
+        gpu_memory = [(0, 24000, 95000), (2, 88000, 95000)]
+        with (
+            patch.object(model_server, "query_gpu_memory", return_value=gpu_memory),
+            patch.object(model_server, "cuda_runtime_error", return_value=None),
+        ):
+            selected = model_server.auto_select_gpus(
+                required_count=1,
+                min_free_memory_mb=20000,
+                required_free_fraction=0.35,
+            )
+
+        self.assertEqual(selected, "2")
+
+    def test_manual_gpu_memory_request_is_checked_before_vllm_startup(self) -> None:
+        gpu_memory = [(0, 24000, 95000)]
+        with patch.object(model_server, "query_gpu_memory", return_value=gpu_memory):
+            with self.assertRaisesRegex(model_server.ModelServerError, "not have enough free memory"):
+                model_server.validate_gpu_memory_request("0", 0.35)
 
     def test_malformed_json_is_reported_as_checker_error(self) -> None:
         with self.assertRaisesRegex(CheckerError, "valid JSON"):

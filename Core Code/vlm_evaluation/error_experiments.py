@@ -579,7 +579,7 @@ def make_error_experiment_charts(
         make_calibration_stability_chart(output_dir, calibration_rows, plt)
 
     if type_ii_by_n_m_rows:
-        make_type_ii_by_n_m_chart(output_dir, type_ii_by_n_m_rows, plt)
+        make_type_ii_by_n_m_chart(output_dir, type_ii_by_n_m_rows, main_n_m, plt)
 
 
 def add_paper_background(axis: Any) -> None:
@@ -624,27 +624,46 @@ def paper_alpha_xlim(rows: list[dict[str, Any]]) -> tuple[float, float]:
 
 def make_calibration_stability_chart(output_dir: Path, calibration_rows: list[dict[str, Any]], plt: Any) -> None:
     targets = sorted({row["target"] for row in calibration_rows})
-    fig, axes = plt.subplots(2, len(targets), figsize=(4.2 * len(targets), 5.0), sharex=True)
-    if len(targets) == 1:
-        axes = [[axes[0]], [axes[1]]]
-    for column, target in enumerate(targets):
+    for target in targets:
         rows = sorted([row for row in calibration_rows if row["target"] == target], key=lambda row: row["n_M"])
         n_m_values = [row["n_M"] for row in rows]
-        for row_index, metric in enumerate(("TPR", "FPR")):
-            axis = axes[row_index][column]
-            means = [row[f"{metric}_mean"] for row in rows]
-            stderrs = [row[f"{metric}_stderr"] for row in rows]
-            axis.errorbar(n_m_values, means, yerr=stderrs, marker="o", linewidth=1.5, capsize=3, label=metric)
-            axis.set_title(display_target_name(target) if row_index == 0 else "")
-            axis.set_ylabel(metric)
-            axis.grid(True, color="0.9", linewidth=0.5)
-            axis.set_ylim(*rate_axis_limits(means, stderrs))
-            if row_index == 1:
-                axis.set_xlabel(r"$n_M$")
-    fig.suptitle(r"Calibration stability across $n_M$", y=0.95, fontsize=11, fontweight="bold")
-    fig.tight_layout(rect=[0, 0, 1, 0.92])
-    fig.savefig(output_dir / "calibration_stability_by_n_m.png", dpi=180)
-    plt.close()
+        tpr_means = [row["TPR_mean"] for row in rows]
+        fpr_means = [row["FPR_mean"] for row in rows]
+        tpr_stderrs = [row["TPR_stderr"] for row in rows]
+        fpr_stderrs = [row["FPR_stderr"] for row in rows]
+        tpr_text = f"{statistics.mean(value for value in tpr_means if value is not None):.3f}"
+        fpr_text = f"{statistics.mean(value for value in fpr_means if value is not None):.3f}"
+
+        fig, axes = plt.subplots(1, 3, figsize=(10.4, 3.1))
+        fig.suptitle(display_target_name(target), fontsize=11, fontweight="bold", y=0.98)
+        for axis in axes:
+            axis.patch.set_facecolor("white")
+            axis.grid(True, color="0.92", linewidth=0.5, alpha=0.8)
+            axis.set_xlim(0, max(n_m_values))
+            axis.set_xlabel(r"$n_M$")
+
+        axes[0].plot(n_m_values, tpr_means, marker="o", markersize=2.3, linewidth=1.0, label="TPR mean")
+        axes[0].plot(n_m_values, fpr_means, marker="o", markersize=2.3, linewidth=1.0, label="FPR mean")
+        axes[0].set_title(f"TPR={tpr_text}, FPR={fpr_text}", fontsize=9, fontstyle="italic")
+        axes[0].set_ylabel("Mean value")
+        axes[0].set_ylim(0.0, 1.0)
+        axes[0].legend(loc="center right", fontsize=7, frameon=False)
+
+        axes[1].plot(n_m_values, tpr_stderrs, marker="o", markersize=2.0, linewidth=1.0, label="TPR SE")
+        axes[1].set_title(f"TPR={tpr_text}, FPR={fpr_text}", fontsize=9, fontstyle="italic")
+        axes[1].set_ylabel("TPR SE")
+        axes[1].set_ylim(*rate_axis_limits(tpr_stderrs, [0.0] * len(tpr_stderrs)))
+        axes[1].legend(loc="upper right", fontsize=7, frameon=False)
+
+        axes[2].plot(n_m_values, fpr_stderrs, marker="o", markersize=2.0, linewidth=1.0, color="#ff7f0e", label="FPR SE")
+        axes[2].set_title(f"TPR={tpr_text}, FPR={fpr_text}", fontsize=9, fontstyle="italic")
+        axes[2].set_ylabel("FPR SE")
+        axes[2].set_ylim(*rate_axis_limits(fpr_stderrs, [0.0] * len(fpr_stderrs)))
+        axes[2].legend(loc="upper right", fontsize=7, frameon=False)
+
+        fig.tight_layout(rect=[0, 0, 1, 0.90])
+        fig.savefig(output_dir / f"calibration_stability_by_n_m_{target}.png", dpi=180)
+        plt.close()
 
 
 def rate_axis_limits(means: list[float], stderrs: list[float]) -> tuple[float, float]:
@@ -733,21 +752,24 @@ def make_failure_heatmap(output_dir: Path, human_label_rows: list[dict[str, Any]
     plt.close()
 
 
-def make_type_ii_by_n_m_chart(output_dir: Path, rows: list[dict[str, Any]], plt: Any) -> None:
+def make_type_ii_by_n_m_chart(output_dir: Path, rows: list[dict[str, Any]], main_n_m: int, plt: Any) -> None:
     """Plot how Noisy HT Type II error changes as the human calibration size grows."""
     targets = sorted({row["target"] for row in rows})
-    fig, axis = plt.subplots(figsize=(7.4, 4.6))
+    fig, axis = plt.subplots(figsize=(7.8, 4.6))
     for target in targets:
         target_rows = sorted([row for row in rows if row["target"] == target], key=lambda row: row["n_M"])
         axis.plot(
             [row["n_M"] for row in target_rows],
             [row["type_ii_error"] for row in target_rows],
             label=display_target_name(target),
-            linewidth=1.6,
+            linewidth=1.8,
         )
-    axis.set_title(r"Noisy HT Type II error by calibration size", fontsize=11, pad=8)
+    max_n_m = max(int(row["n_M"]) for row in rows)
+    axis.axvline(main_n_m, color="0.35", linestyle="--", linewidth=1.0, label=rf"chosen $n_M={main_n_m}$")
+    axis.set_title(r"Noisy HT Type II error as human calibration grows", fontsize=11, pad=8)
     axis.set_xlabel(r"Human calibration labels per target ($n_M$)")
     axis.set_ylabel("Type II error probability")
+    axis.set_xlim(0, max_n_m)
     axis.set_ylim(0.0, 1.0)
     axis.grid(True, color="0.9", linewidth=0.5)
     axis.legend(loc="upper right", fontsize=8, frameon=True)
@@ -830,7 +852,7 @@ def make_fixed_alpha_score_chart(output_dir: Path, human_label_rows: list[dict[s
     lost = [row["lost_points"] for row in target_rows]
     threshold_score = 100 * (1 - fixed_alpha)
 
-    fig, axis = plt.subplots(figsize=(7.2, 4.0))
+    fig, (axis, deduction_axis) = plt.subplots(1, 2, figsize=(10.2, 4.8), gridspec_kw={"width_ratios": [1.25, 1.0]})
     y_positions = list(range(len(labels)))
     axis.barh(y_positions, scores, color="#4daf4a", label="earned score")
     axis.barh(y_positions, lost, left=scores, color="#f4a6a6", label="lost to failures")
@@ -847,8 +869,29 @@ def make_fixed_alpha_score_chart(output_dir: Path, human_label_rows: list[dict[s
     axis.set_yticklabels(labels)
     axis.set_xlim(0, 100)
     axis.grid(axis="x", color="0.9", linewidth=0.5)
-    axis.legend(loc="lower center", bbox_to_anchor=(0.5, -0.28), ncol=3, fontsize=8, frameon=True)
-    fig.tight_layout(rect=[0, 0.08, 1, 1])
+    axis.legend(loc="lower center", bbox_to_anchor=(0.5, -0.30), ncol=3, fontsize=8, frameon=True)
+
+    image_type_rows = [
+        row
+        for row in rows
+        if row["target"] != "overall" and row["image_type"] != "all"
+    ]
+    top_deductions = sorted(image_type_rows, key=lambda row: row["lost_points"], reverse=True)[:6]
+    deduction_labels = [f"{display_target_name(row['target'])}\n{row['image_type']}" for row in top_deductions]
+    deduction_values = [row["lost_points"] for row in top_deductions]
+    deduction_positions = list(range(len(top_deductions)))
+    deduction_axis.barh(deduction_positions, deduction_values, color="#f4a6a6")
+    deduction_axis.set_title("Largest deductions", fontsize=10, pad=6)
+    deduction_axis.set_xlabel("Lost points")
+    deduction_axis.set_yticks(deduction_positions)
+    deduction_axis.set_yticklabels(deduction_labels, fontsize=8)
+    deduction_axis.set_xlim(0, 100)
+    deduction_axis.grid(axis="x", color="0.9", linewidth=0.5)
+    deduction_axis.invert_yaxis()
+    for y, value in zip(deduction_positions, deduction_values):
+        deduction_axis.text(min(value + 1, 96), y, f"{value:.1f}", va="center", fontsize=8)
+
+    fig.tight_layout(rect=[0, 0.10, 1, 1])
     fig.savefig(output_dir / "fixed_alpha_score_breakdown.png", dpi=180)
     plt.close()
 
