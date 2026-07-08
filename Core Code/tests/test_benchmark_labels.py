@@ -16,10 +16,12 @@ from benchmark_labels import (
     CSV_COLUMNS,
     TARGETS,
     apply_benchmark_labels,
+    default_benchmark_path,
     hash_target_response,
     load_benchmark_rows,
     merge_existing_benchmark_labels,
     read_benchmark_csv,
+    response_fingerprint,
     write_benchmark_csv,
 )
 
@@ -158,6 +160,24 @@ class BenchmarkLabelTest(unittest.TestCase):
                 self.assertEqual(len(rows), 3)
                 self.assertEqual(rows[0]["label_status"], "complete")
                 self.assertEqual(rows[1]["label_status"], "waiting_for_response")
+
+    def test_response_fingerprint_changes_benchmark_path_for_same_model(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            write_tiny_dataset(project_root)
+            first_rows = load_benchmark_rows(project_root, "Large Dataset", "same-model")
+
+            qa_path = project_root / "Large Dataset" / "charts" / "qa" / "charts_0001.json"
+            data = json.loads(qa_path.read_text(encoding="utf-8"))
+            data["items"][0]["target_model_response"] = "different answer"
+            write_json(qa_path, data)
+            second_rows = load_benchmark_rows(project_root, "Large Dataset", "same-model")
+
+            first_path = default_benchmark_path(project_root, "Large Dataset", "same-model", response_fingerprint(first_rows))
+            second_path = default_benchmark_path(project_root, "Large Dataset", "same-model", response_fingerprint(second_rows))
+
+            self.assertNotEqual(first_path, second_path)
+            self.assertEqual(first_path.parent, second_path.parent)
 
     def test_reader_accepts_older_csv_without_label_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

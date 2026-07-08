@@ -268,7 +268,7 @@ def apply_human_label_sheet(path: Path, records: list[dict[str, Any]]) -> list[d
 
     records_by_key = {record_key(record): record for record in records}
     labelled_keys: set[str] = set()
-    missing: list[str] = []
+    missing_by_key: dict[str, str] = {}
 
     with path.open("r", encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
@@ -278,7 +278,7 @@ def apply_human_label_sheet(path: Path, records: list[dict[str, Any]]) -> list[d
                 continue
             label_text = (row.get("human_label") or "").strip()
             if label_text not in {"0", "1"}:
-                missing.append(records_by_key[key]["item_id"])
+                missing_by_key[key] = records_by_key[key]["item_id"]
                 continue
             human_label = int(label_text)
             reason = (row.get("human_failure_reason") or "").strip() or None
@@ -293,10 +293,15 @@ def apply_human_label_sheet(path: Path, records: list[dict[str, Any]]) -> list[d
 
     for key, record in records_by_key.items():
         if key not in labelled_keys:
-            missing.append(record["item_id"])
+            missing_by_key[key] = record["item_id"]
 
-    if missing:
-        raise ValueError(f"Human labels missing or invalid in label sheet for: {', '.join(missing)}")
+    if missing_by_key:
+        missing = list(missing_by_key.values())
+        examples = ", ".join(missing[:10])
+        raise ValueError(
+            f"Human labels missing or invalid in label sheet for {len(missing)} rows. "
+            f"Examples: {examples}"
+        )
 
     return validate_human_labels(records)
 

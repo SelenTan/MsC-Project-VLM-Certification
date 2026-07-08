@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
+import math
 import mimetypes
 import os
 import sys
@@ -69,6 +71,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, default=None, help="Optional maximum number of items to run.")
     parser.add_argument("--max-tokens", type=int, default=160, help="Maximum response tokens.")
+    parser.add_argument(
+        "--max-image-pixels",
+        type=int,
+        default=2_000_000,
+        help="Resize request images above this pixel count before sending them to vLLM. Use 0 to disable.",
+    )
     parser.add_argument("--progress-interval", type=int, default=25, help="Print target progress every N records.")
     parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature.")
     parser.add_argument("--timeout", type=int, default=180, help="HTTP request timeout in seconds.")
@@ -122,9 +130,34 @@ def ordered_items(data: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
-def image_data_url(image_path: Path) -> str:
+def image_data_url(image_path: Path, max_image_pixels: int | None = None) -> str:
+    """Return an image data URL, resizing only the request copy when it exceeds max_image_pixels."""
     mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
-    image_bytes = image_path.read_bytes()
+    max_pixels = max_image_pixels or 0
+    if max_pixels <= 0:
+        image_bytes = image_path.read_bytes()
+    else:
+        try:
+            from PIL import Image, ImageOps
+        except ImportError as exc:
+            raise VLMRequestError("Pillow is required to resize target VLM request images.") from exc
+
+        with Image.open(image_path) as image:
+            image = ImageOps.exif_transpose(image)
+            width, height = image.size
+            pixel_count = width * height
+            if pixel_count <= max_pixels:
+                image_bytes = image_path.read_bytes()
+            else:
+                scale = math.sqrt(max_pixels / pixel_count)
+                new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+                resized = image.resize(new_size, Image.Resampling.LANCZOS)
+                if resized.mode not in ("RGB", "L"):
+                    resized = resized.convert("RGB")
+                buffer = io.BytesIO()
+                resized.save(buffer, format="JPEG", quality=90, optimize=True)
+                image_bytes = buffer.getvalue()
+                mime_type = "image/jpeg"
     encoded = base64.b64encode(image_bytes).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
 
@@ -148,9 +181,10 @@ def build_payload(
     image_path: Path,
     max_tokens: int,
     temperature: float,
+    max_image_pixels: int | None = None,
 ) -> dict[str, Any]:
     user_content = [
-        {"type": "image_url", "image_url": {"url": image_data_url(image_path)}},
+        {"type": "image_url", "image_url": {"url": image_data_url(image_path, max_image_pixels)}},
         {"type": "text", "text": item["prompt"]},
     ]
     return {
@@ -247,6 +281,7 @@ def run_dataset(args: argparse.Namespace) -> int:
                 image_path=image_path,
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
+                max_image_pixels=getattr(args, "max_image_pixels", None),
             )
             item["target_model_response"] = call_vlm(
                 endpoint=endpoint,
@@ -335,6 +370,7 @@ def run_records(
                     image_path=image_path,
                     max_tokens=args.max_tokens,
                     temperature=args.temperature,
+                    max_image_pixels=getattr(args, "max_image_pixels", None),
                 ),
                 timeout=args.timeout,
             )

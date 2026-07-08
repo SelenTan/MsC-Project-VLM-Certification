@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import base64
+import io
 import json
 import sys
 import tempfile
@@ -8,6 +10,11 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -20,11 +27,48 @@ import model_server
 import run_target_vlm
 import workflow_state
 from ai_checker import CheckerError, build_checker_payload, parse_checker_json
-from artifacts import write_human_label_sheet
+from artifacts import apply_human_label_sheet, write_human_label_sheet
 from normalization import normalize_dataset_references, normalize_reference_answer
 
 
 class EvaluationCheckpointTest(unittest.TestCase):
+    @unittest.skipIf(Image is None, "Pillow is not installed in this test environment")
+    def test_large_target_image_is_resized_for_request_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "large.jpg"
+            Image.new("RGB", (400, 300), color="white").save(image_path)
+
+            data_url = run_target_vlm.image_data_url(image_path, max_image_pixels=10_000)
+            encoded = data_url.split(",", 1)[1]
+            with Image.open(io.BytesIO(base64.b64decode(encoded))) as resized:
+                self.assertLessEqual(resized.width * resized.height, 10_000)
+
+            with Image.open(image_path) as original:
+                self.assertEqual(original.size, (400, 300))
+
+    def test_human_label_sheet_error_message_is_short(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sheet_path = Path(temp_dir) / "human_label_tasks.csv"
+            records = [
+                {
+                    "qa_json_path": "Large Dataset/charts/qa/a.json",
+                    "item_index": index,
+                    "item_id": f"item-{index}",
+                    "target": "visual_factuality",
+                    "model_input_image_path": "image.jpg",
+                    "prompt": "prompt",
+                    "expected_evidence": "evidence",
+                    "expected_answer_or_behavior": "answer",
+                    "target_model_response": "response",
+                    "notes": "",
+                }
+                for index in range(12)
+            ]
+            write_human_label_sheet(sheet_path, records)
+
+            with self.assertRaisesRegex(ValueError, "12 rows. Examples: item-0"):
+                apply_human_label_sheet(sheet_path, records)
+
     def test_archive_wrapper_matches_export_interface(self) -> None:
         with patch.object(main, "export_run_artifacts") as export_mock:
             main.archive_run_artifacts(
@@ -314,6 +358,27 @@ class EvaluationCheckpointTest(unittest.TestCase):
         with patch.object(model_server, "query_gpu_memory", return_value=gpu_memory):
             with self.assertRaisesRegex(model_server.ModelServerError, "not have enough free memory"):
                 model_server.validate_gpu_memory_request("0", 0.35)
+
+    def test_vllm_log_summary_includes_root_cause_before_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / "vllm.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "startup line",
+                        "ValueError: Free memory on device cuda:0 is less than desired GPU memory utilization.",
+                        "wrapper line",
+                        "RuntimeError: Engine core initialization failed. See root cause above.",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            summary = model_server.summarize_vllm_log(log_path)
+
+        self.assertIn("Likely root cause", summary)
+        self.assertIn("Free memory on device", summary)
+        self.assertIn("Last log lines", summary)
 
     def test_malformed_json_is_reported_as_checker_error(self) -> None:
         with self.assertRaisesRegex(CheckerError, "valid JSON"):

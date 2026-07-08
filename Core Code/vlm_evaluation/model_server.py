@@ -196,14 +196,14 @@ def wait_for_endpoint(
         if process.poll() is not None:
             raise ModelServerError(
                 f"vLLM server exited before becoming ready. Check log: {log_path}\n\n"
-                f"Last log lines:\n{tail_log(log_path)}"
+                f"Log summary:\n{summarize_vllm_log(log_path)}"
             )
         if endpoint_available(endpoint, timeout=5, expected_model=expected_model):
             return
         time.sleep(5)
     raise ModelServerError(
         f"Timed out waiting for vLLM server. Check log: {log_path}\n\n"
-        f"Last log lines:\n{tail_log(log_path)}"
+        f"Log summary:\n{summarize_vllm_log(log_path)}"
     )
 
 
@@ -212,6 +212,49 @@ def tail_log(path: Path, max_lines: int = 80) -> str:
         return "<log file does not exist>"
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     return "\n".join(lines[-max_lines:]) or "<log file is empty>"
+
+
+def summarize_vllm_log(path: Path, context_lines: int = 2, tail_lines: int = 50) -> str:
+    """Return likely root-cause lines plus a short tail from a vLLM startup log."""
+    if not path.exists():
+        return "<log file does not exist>"
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if not lines:
+        return "<log file is empty>"
+    patterns = (
+        "ValueError:",
+        "RuntimeError:",
+        "torch.OutOfMemoryError",
+        "CUDA error",
+        "CUDA initialization",
+        "No space left on device",
+        "Disk quota exceeded",
+        "less than desired GPU memory utilization",
+        "Input length",
+    )
+    indexes = [index for index, line in enumerate(lines) if any(pattern in line for pattern in patterns)]
+    root_cause = []
+    for index in indexes[-3:]:
+        start = max(0, index - context_lines)
+        end = min(len(lines), index + context_lines + 1)
+        root_cause.extend(lines[start:end])
+    tail = lines[-tail_lines:]
+    sections = []
+    if root_cause:
+        sections.append("Likely root cause:\n" + "\n".join(dedupe_preserve_order(root_cause)))
+    sections.append("Last log lines:\n" + "\n".join(tail))
+    return "\n\n".join(sections)
+
+
+def dedupe_preserve_order(lines: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for line in lines:
+        if line in seen:
+            continue
+        seen.add(line)
+        result.append(line)
+    return result
 
 
 def validate_cuda_runtime(env: dict[str, str], cuda_visible_devices: str) -> None:

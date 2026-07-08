@@ -145,9 +145,22 @@ def build_row(
     return row
 
 
-def benchmark_filename(dataset_dir: str) -> str:
+def benchmark_filename(dataset_dir: str, response_fingerprint: str = "") -> str:
     prefix = dataset_dir.replace(" Dataset", "").replace(" ", "_").lower()
+    if response_fingerprint:
+        return f"{prefix}_{response_fingerprint}_human_labels.csv"
     return f"{prefix}_human_labels.csv"
+
+
+def response_fingerprint(rows: list[dict[str, str]]) -> str:
+    """Identify one full benchmark response set from item keys and target response hashes."""
+    digest = hashlib.sha256()
+    for row in sorted(rows, key=lambda value: value["record_key"]):
+        digest.update(row["record_key"].encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((row.get("target_response_hash") or "").encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()[:12]
 
 
 def load_benchmark_rows(
@@ -197,17 +210,27 @@ def write_large_human_label_benchmark(
     target_model_name: str = "",
     dataset_paths: dict[str, str] | None = None,
 ) -> Path:
-    if output_path is None:
-        output_path = default_benchmark_path(project_root, dataset_dir, target_model_name)
     rows = load_benchmark_rows(project_root, dataset_dir, target_model_name, dataset_paths)
+    if output_path is None:
+        output_path = default_benchmark_path(
+            project_root,
+            dataset_dir,
+            target_model_name,
+            response_fingerprint(rows),
+        )
     write_benchmark_csv(output_path, rows)
     return output_path
 
 
-def default_benchmark_path(project_root: Path, dataset_dir: str, target_model_name: str = "") -> Path:
+def default_benchmark_path(
+    project_root: Path,
+    dataset_dir: str,
+    target_model_name: str = "",
+    response_set_id: str = "",
+) -> Path:
     if target_model_name:
-        return project_root / "benchmark_labels" / short_model_name(target_model_name) / benchmark_filename(dataset_dir)
-    return project_root / "benchmark_labels" / benchmark_filename(dataset_dir)
+        return project_root / "benchmark_labels" / short_model_name(target_model_name) / benchmark_filename(dataset_dir, response_set_id)
+    return project_root / "benchmark_labels" / benchmark_filename(dataset_dir, response_set_id)
 
 
 def infer_label_status(row: dict[str, str]) -> str:
@@ -342,12 +365,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
     args = parse_args()
+    rows = load_benchmark_rows(project_root, args.dataset_dir, args.target_model_name)
     output_path = (
         project_path(project_root, args.output)
         if args.output
-        else default_benchmark_path(project_root, args.dataset_dir, args.target_model_name)
+        else default_benchmark_path(project_root, args.dataset_dir, args.target_model_name, response_fingerprint(rows))
     )
-    rows = load_benchmark_rows(project_root, args.dataset_dir, args.target_model_name)
     write_benchmark_csv(output_path, rows)
     print(f"Wrote {len(rows)} benchmark rows to {output_path}")
 

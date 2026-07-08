@@ -42,7 +42,9 @@ from benchmark_labels import (
     apply_benchmark_labels,
     default_benchmark_path,
     load_benchmark_rows,
+    merge_existing_benchmark_labels,
     read_benchmark_csv,
+    response_fingerprint,
     write_benchmark_csv,
 )
 from certification import alpha_grid, estimate_reliability, run_monte_carlo, summarize_certificates
@@ -100,11 +102,12 @@ TARGET_GPU_MEMORY_UTILIZATION = 0.7
 TARGET_LIMIT = None
 TARGET_LIMIT_MM_PER_PROMPT = '{"image":2,"video":0}'
 TARGET_MAX_GPUS = 1
+TARGET_MAX_IMAGE_PIXELS = 2_000_000
 TARGET_MAX_MODEL_LEN = 32768
 TARGET_MAX_TOKENS = 160
-TARGET_MIN_FREE_MEMORY_MB = 20000
+TARGET_MIN_FREE_MEMORY_MB = 40000
 TARGET_MM_ENCODER_TP_MODE = None
-TARGET_MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
+TARGET_MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
 TARGET_OVERWRITE_RESPONSES = False
 TARGET_PORT = 8000
 TARGET_PROGRESS_INTERVAL = 25
@@ -114,7 +117,10 @@ TARGET_TEMPERATURE = 0.0
 TARGET_TENSOR_PARALLEL_SIZE = None
 TARGET_TIMEOUT_SECONDS = 180
 TARGET_VLLM_EXTRA_ARGS = (
-    "--dtype", "float16",
+    "--dtype",
+    "float16",
+    "--mm-processor-kwargs",
+    '{"max_pixels":2000000}',
 )
 
 # Automatic local checker deployment
@@ -127,7 +133,7 @@ CHECKER_LIMIT_MM_PER_PROMPT = None
 CHECKER_MAX_MODEL_LEN = 8192
 CHECKER_MIN_FREE_MEMORY_MB = 20000
 CHECKER_MM_ENCODER_TP_MODE = None
-CHECKER_MODEL_NAME = "Qwen/Qwen2.5-14B-Instruct"
+CHECKER_MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
 CHECKER_NUM_GPUS = 1
 CHECKER_PORT = 8001
 CHECKER_INTERNAL_ENDPOINT = f"http://localhost:{CHECKER_PORT}/v1/chat/completions"
@@ -146,14 +152,14 @@ HUMAN_GOLD_MAX_PER_TARGET = 1000
 N_M = 50
 N_M_GRID = (25, 50, 100)
 N_M_CALIBRATION_SWEEP_MIN = 5
-N_M_CALIBRATION_SWEEP_MAX = 1000
+N_M_CALIBRATION_SWEEP_MAX = 200
 N_M_CALIBRATION_SWEEP_STEP = 25
 N_M_SWEEP_MIN = 5
 N_M_SWEEP_DENSE_MAX = 100
 N_M_SWEEP_DENSE_STEP = 5
 N_M_SWEEP_MID_MAX = 1000
 N_M_SWEEP_MID_STEP = 50
-N_M_SWEEP_HIGH_MAX = 10000
+N_M_SWEEP_HIGH_MAX = 1000
 N_M_SWEEP_HIGH_STEP = 250
 N_M_SWEEP_REPEATS = 1000
 TYPE_II_SWEEP_ALPHA_MARGIN = 0.10
@@ -204,6 +210,7 @@ def current_config(run_name: str) -> dict[str, Any]:
         "target_progress_interval": TARGET_PROGRESS_INTERVAL,
         "target_cuda_visible_devices": TARGET_CUDA_VISIBLE_DEVICES,
         "target_max_gpus": TARGET_MAX_GPUS,
+        "target_max_image_pixels": TARGET_MAX_IMAGE_PIXELS,
         "target_required_balanced_memory_mb": TARGET_REQUIRED_BALANCED_MEMORY_MB,
         "target_min_free_memory_mb": TARGET_MIN_FREE_MEMORY_MB,
         "target_tensor_parallel_size": TARGET_TENSOR_PARALLEL_SIZE,
@@ -299,18 +306,34 @@ def n_m_sweep_values() -> tuple[int, ...]:
 
 def n_m_calibration_sweep_values() -> tuple[int, ...]:
     """Build the paper-style TPR/FPR stability sweep; n_M=0 is not estimable."""
-    return tuple(range(N_M_CALIBRATION_SWEEP_MIN, N_M_CALIBRATION_SWEEP_MAX + 1, N_M_CALIBRATION_SWEEP_STEP))
+    values = set(range(N_M_CALIBRATION_SWEEP_MIN, N_M_CALIBRATION_SWEEP_MAX + 1, N_M_CALIBRATION_SWEEP_STEP))
+    values.add(N_M_CALIBRATION_SWEEP_MAX)
+    return tuple(sorted(values))
 
 
 def target_internal_endpoint() -> str:
     return f"http://localhost:{TARGET_PORT}/v1/chat/completions"
 
 
+def cuda_visible_devices_text(value: Any, config_name: str) -> str | None:
+    """Normalize CUDA device config values from main.py into CUDA_VISIBLE_DEVICES text."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized:
+            return normalized
+        raise ValueError(f"{config_name} must not be an empty string.")
+    raise TypeError(f"{config_name} must be None, an int like 0, or a string like '0' or '0,2'.")
+
+
 def maybe_start_target_server(run_dir: Path) -> ManagedServer:
     """Start the target VLM server only when selected records still need model responses."""
     if not RUN_TARGET_VLM_FIRST:
         return ManagedServer(process=None, log_path=None)
-    cuda_visible_devices = TARGET_CUDA_VISIBLE_DEVICES
+    cuda_visible_devices = cuda_visible_devices_text(TARGET_CUDA_VISIBLE_DEVICES, "TARGET_CUDA_VISIBLE_DEVICES")
     if cuda_visible_devices is None:
         cuda_visible_devices = auto_select_gpus_by_balanced_memory(
             max_gpu_count=TARGET_MAX_GPUS,
@@ -341,7 +364,7 @@ def maybe_start_checker_server(run_dir: Path) -> ManagedServer:
     """Start the local checker server used to label target responses as success or failure."""
     if not AUTO_DEPLOY_CHECKER:
         return ManagedServer(process=None, log_path=None)
-    cuda_visible_devices = CHECKER_CUDA_VISIBLE_DEVICES
+    cuda_visible_devices = cuda_visible_devices_text(CHECKER_CUDA_VISIBLE_DEVICES, "CHECKER_CUDA_VISIBLE_DEVICES")
     if cuda_visible_devices is None:
         cuda_visible_devices = auto_select_gpus(
             CHECKER_NUM_GPUS,
@@ -600,6 +623,7 @@ def target_args_for_config(config: dict[str, Any]) -> SimpleNamespace:
         targets=tuple(config["targets"]),
         limit=None,
         max_tokens=config["target_max_tokens"],
+        max_image_pixels=config.get("target_max_image_pixels", TARGET_MAX_IMAGE_PIXELS),
         temperature=config["target_temperature"],
         timeout=config["target_timeout_seconds"],
         overwrite=config["target_overwrite_responses"],
@@ -956,14 +980,25 @@ def ensure_benchmark_label_csv(
     dataset_dir: str,
     target_model_name: str,
     dataset_paths: dict[str, str] | None = None,
+    run_name: str = "",
 ) -> Path:
     """Create the response-specific benchmark CSV if it does not already exist."""
-    benchmark_path = default_benchmark_path(PROJECT_ROOT, dataset_dir, target_model_name)
+    fresh_rows = load_benchmark_rows(PROJECT_ROOT, dataset_dir, target_model_name, dataset_paths or DATASET_PATHS)
+    response_set_id = response_fingerprint(fresh_rows)
+    file_label = safe_benchmark_run_label(run_name) or response_set_id
+    benchmark_path = default_benchmark_path(PROJECT_ROOT, dataset_dir, target_model_name, file_label)
     if benchmark_path.exists():
         return benchmark_path
-    fresh_rows = load_benchmark_rows(PROJECT_ROOT, dataset_dir, target_model_name, dataset_paths or DATASET_PATHS)
+
+    legacy_path = default_benchmark_path(PROJECT_ROOT, dataset_dir, target_model_name)
+    if legacy_path.exists():
+        fresh_rows = merge_existing_benchmark_labels(fresh_rows, read_benchmark_csv(legacy_path))
     write_benchmark_csv(benchmark_path, fresh_rows)
     return benchmark_path
+
+
+def safe_benchmark_run_label(run_name: str) -> str:
+    return "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in run_name).strip("_")
 
 
 def build_final_results() -> None:
@@ -1010,7 +1045,7 @@ def build_final_results() -> None:
     else:
         records = load_records(PROJECT_ROOT, DATASET_DIR, TARGETS, source_dataset_paths)
 
-    benchmark_path = ensure_benchmark_label_csv(DATASET_DIR, target_model_name, source_dataset_paths)
+    benchmark_path = ensure_benchmark_label_csv(DATASET_DIR, target_model_name, source_dataset_paths, run_name=run_dir.name)
     use_run_human_sheet = True
     if benchmark_path.exists():
         try:
@@ -1135,16 +1170,13 @@ def run_paper_style_experiments(run_dir: Path | None = None) -> None:
     config = load_run_config(run_dir)
     DATASET_DIR = config["dataset_dir"]
     target_model_name = config.get("target_model_name", TARGET_MODEL_NAME)
-    benchmark_path = default_benchmark_path(PROJECT_ROOT, DATASET_DIR, target_model_name)
-    if not benchmark_path.exists():
-        raise ValueError(f"benchmark labels not found: {benchmark_path}")
-
     source_dataset_paths = snapshot_dataset_paths(run_dir) or DATASET_PATHS
     records = load_records(PROJECT_ROOT, DATASET_DIR, TARGETS, source_dataset_paths)
     missing_judge_labels = [record_key(record) for record in records if record.get("judge_label") is None]
     if missing_judge_labels:
         examples = ", ".join(missing_judge_labels[:10])
         raise ValueError(f"{len(missing_judge_labels)} judge labels are missing from the saved dataset. Examples: {examples}")
+    benchmark_path = ensure_benchmark_label_csv(DATASET_DIR, target_model_name, source_dataset_paths, run_name=run_dir.name)
     benchmark_rows = read_benchmark_csv(benchmark_path)
     records = apply_benchmark_labels(records, benchmark_rows)
     output_dir = run_dir / "error_experiments"
