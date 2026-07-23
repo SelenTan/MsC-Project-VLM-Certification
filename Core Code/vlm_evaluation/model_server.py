@@ -99,18 +99,27 @@ def query_usable_gpus(
         if required_free_fraction is not None and free_memory_mb < total_memory_mb * required_free_fraction:
             continue
         env = os.environ.copy()
+        env.pop("TRANSFORMERS_CACHE", None)
+        apply_thread_limits(env)
         env["CUDA_VISIBLE_DEVICES"] = str(index)
         error_text = cuda_runtime_error(env, str(index))
         if error_text is None:
             usable.append((index, free_memory_mb))
         else:
-            failed.append(f"gpu{index}:{free_memory_mb}MB")
+            failed.append(f"gpu{index}:{free_memory_mb}MB ({single_line_error(error_text)})")
     if not usable and failed:
         raise ModelServerError(
             "nvidia-smi reports free GPUs, but PyTorch cannot initialize CUDA on them: "
             + ", ".join(failed)
         )
     return usable
+
+
+def single_line_error(text: str, max_length: int = 240) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= max_length:
+        return compact
+    return compact[: max_length - 3].rstrip() + "..."
 
 
 def query_gpu_memory(min_free_memory_mb: int) -> list[tuple[int, int, int]]:
@@ -195,7 +204,8 @@ def wait_for_endpoint(
     while time.time() < deadline:
         if process.poll() is not None:
             raise ModelServerError(
-                f"vLLM server exited before becoming ready. Check log: {log_path}\n\n"
+                f"vLLM server exited with return code {process.returncode} before becoming ready. "
+                f"Check log: {log_path}\n\n"
                 f"Log summary:\n{summarize_vllm_log(log_path)}"
             )
         if endpoint_available(endpoint, timeout=5, expected_model=expected_model):
@@ -215,12 +225,16 @@ def tail_log(path: Path, max_lines: int = 80) -> str:
 
 
 def summarize_vllm_log(path: Path, context_lines: int = 2, tail_lines: int = 50) -> str:
-    """Return likely root-cause lines plus a short tail from a vLLM startup log."""
+    """Return likely root-cause lines plus a short tail from the latest vLLM startup."""
     if not path.exists():
         return "<log file does not exist>"
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     if not lines:
         return "<log file is empty>"
+    for index in range(len(lines) - 1, -1, -1):
+        if lines[index] == "=== vLLM command ===":
+            lines = lines[index:]
+            break
     patterns = (
         "ValueError:",
         "RuntimeError:",
@@ -255,6 +269,14 @@ def dedupe_preserve_order(lines: list[str]) -> list[str]:
         seen.add(line)
         result.append(line)
     return result
+
+
+def apply_thread_limits(env: dict[str, str]) -> None:
+    """Keep BLAS/OMP libraries from exhausting shared-machine thread quotas during vLLM startup."""
+    env["OPENBLAS_NUM_THREADS"] = "1"
+    env["OMP_NUM_THREADS"] = "1"
+    env["MKL_NUM_THREADS"] = "1"
+    env["NUMEXPR_NUM_THREADS"] = "1"
 
 
 def validate_cuda_runtime(env: dict[str, str], cuda_visible_devices: str) -> None:
@@ -300,6 +322,19 @@ def validate_gpu_memory_request(cuda_visible_devices: str, gpu_memory_utilizatio
             "Selected GPU(s) do not have enough free memory for "
             f"gpu_memory_utilization={gpu_memory_utilization}: "
             + "; ".join(insufficient)
+        )
+
+
+def validate_tensor_parallel_size(env: dict[str, str], tensor_parallel_size: int, cuda_visible_devices: str) -> None:
+    """Fail before vLLM startup when tensor parallelism exceeds visible CUDA devices."""
+    if tensor_parallel_size <= 0:
+        raise ModelServerError(f"tensor_parallel_size must be positive, got {tensor_parallel_size}.")
+    visible_count = cuda_device_count(env)
+    if tensor_parallel_size > visible_count:
+        raise ModelServerError(
+            f"tensor_parallel_size={tensor_parallel_size} but PyTorch sees only {visible_count} CUDA device(s). "
+            f"CUDA_VISIBLE_DEVICES={cuda_visible_devices or '<unset>'}. "
+            "Use one visible GPU per tensor-parallel shard, or set tensor_parallel_size=1."
         )
 
 
@@ -402,9 +437,12 @@ def start_vllm_server(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["HF_HUB_DISABLE_XET"] = "1"
+    env.pop("TRANSFORMERS_CACHE", None)
+    apply_thread_limits(env)
     if cuda_visible_devices:
         env["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
     validate_cuda_runtime(env, cuda_visible_devices)
+    validate_tensor_parallel_size(env, tensor_parallel_size, cuda_visible_devices)
     validate_gpu_memory_request(cuda_visible_devices, gpu_memory_utilization)
 
     log_file = log_path.open("ab")
@@ -415,6 +453,10 @@ def start_vllm_server(
         log_file.write(f"\n\n=== vLLM command ===\n{command_text}\n".encode("utf-8"))
         log_file.write(f"CUDA_VISIBLE_DEVICES={env.get('CUDA_VISIBLE_DEVICES', '')}\n".encode("utf-8"))
         log_file.write(f"HF_HUB_DISABLE_XET={env['HF_HUB_DISABLE_XET']}\n".encode("utf-8"))
+        log_file.write(f"OPENBLAS_NUM_THREADS={env['OPENBLAS_NUM_THREADS']}\n".encode("utf-8"))
+        log_file.write(f"OMP_NUM_THREADS={env['OMP_NUM_THREADS']}\n".encode("utf-8"))
+        log_file.write(f"MKL_NUM_THREADS={env['MKL_NUM_THREADS']}\n".encode("utf-8"))
+        log_file.write(f"NUMEXPR_NUM_THREADS={env['NUMEXPR_NUM_THREADS']}\n".encode("utf-8"))
         log_file.flush()
         process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=env)
         wait_for_endpoint(endpoint, served_model_name, process, wait_timeout_seconds, log_path)

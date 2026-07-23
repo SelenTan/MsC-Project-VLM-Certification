@@ -292,26 +292,33 @@ class EvaluationCheckpointTest(unittest.TestCase):
                 patch.object(model_server, "endpoint_model_ids", return_value=None),
                 patch.object(model_server.shutil, "which", return_value="/bin/vllm"),
                 patch.object(model_server, "validate_cuda_runtime"),
+                patch.object(model_server, "validate_tensor_parallel_size"),
                 patch.object(model_server.subprocess, "Popen", return_value=process) as popen_mock,
                 patch.object(model_server, "wait_for_endpoint", side_effect=RuntimeError("startup failed")),
             ):
                 with self.assertRaisesRegex(RuntimeError, "startup failed"):
-                    model_server.start_vllm_server(
-                        endpoint="http://localhost:8000/v1/chat/completions",
-                        model="required-model",
-                        served_model_name="required-model",
-                        log_path=Path(temp_dir) / "server.log",
-                        cuda_visible_devices="0",
-                        tensor_parallel_size=1,
-                        max_model_len=None,
-                        gpu_memory_utilization=None,
-                        limit_mm_per_prompt=None,
-                        mm_encoder_tp_mode=None,
-                        extra_args=(),
-                        wait_timeout_seconds=1,
-                    )
+                    with patch.dict(model_server.os.environ, {"TRANSFORMERS_CACHE": "/tmp/deprecated-cache"}):
+                        model_server.start_vllm_server(
+                            endpoint="http://localhost:8000/v1/chat/completions",
+                            model="required-model",
+                            served_model_name="required-model",
+                            log_path=Path(temp_dir) / "server.log",
+                            cuda_visible_devices="0",
+                            tensor_parallel_size=1,
+                            max_model_len=None,
+                            gpu_memory_utilization=None,
+                            limit_mm_per_prompt=None,
+                            mm_encoder_tp_mode=None,
+                            extra_args=(),
+                            wait_timeout_seconds=1,
+                        )
                 popen_kwargs = popen_mock.call_args.kwargs
                 self.assertEqual(popen_kwargs["env"]["HF_HUB_DISABLE_XET"], "1")
+                self.assertNotIn("TRANSFORMERS_CACHE", popen_kwargs["env"])
+                self.assertEqual(popen_kwargs["env"]["OPENBLAS_NUM_THREADS"], "1")
+                self.assertEqual(popen_kwargs["env"]["OMP_NUM_THREADS"], "1")
+                self.assertEqual(popen_kwargs["env"]["MKL_NUM_THREADS"], "1")
+                self.assertEqual(popen_kwargs["env"]["NUMEXPR_NUM_THREADS"], "1")
 
         process.terminate.assert_called_once()
         process.wait.assert_called_once_with(timeout=30)
@@ -338,6 +345,37 @@ class EvaluationCheckpointTest(unittest.TestCase):
             selected = model_server.auto_select_gpus(required_count=1, min_free_memory_mb=80000)
 
         self.assertEqual(selected, "2")
+
+    def test_auto_select_cuda_probe_uses_sanitized_thread_limited_env(self) -> None:
+        gpu_memory = [(0, 90000, 95000)]
+        seen_envs: list[dict[str, str]] = []
+
+        def cuda_error(env: dict[str, str], _cuda_visible_devices: str) -> str | None:
+            seen_envs.append(env)
+            return None
+
+        with (
+            patch.dict(model_server.os.environ, {"TRANSFORMERS_CACHE": "/tmp/deprecated-cache"}),
+            patch.object(model_server, "query_gpu_memory", return_value=gpu_memory),
+            patch.object(model_server, "cuda_runtime_error", side_effect=cuda_error),
+        ):
+            selected = model_server.auto_select_gpus(required_count=1, min_free_memory_mb=80000)
+
+        self.assertEqual(selected, "0")
+        self.assertNotIn("TRANSFORMERS_CACHE", seen_envs[0])
+        self.assertEqual(seen_envs[0]["OPENBLAS_NUM_THREADS"], "1")
+        self.assertEqual(seen_envs[0]["OMP_NUM_THREADS"], "1")
+        self.assertEqual(seen_envs[0]["MKL_NUM_THREADS"], "1")
+        self.assertEqual(seen_envs[0]["NUMEXPR_NUM_THREADS"], "1")
+
+    def test_auto_select_reports_cuda_probe_error_details(self) -> None:
+        gpu_memory = [(0, 90000, 95000)]
+        with (
+            patch.object(model_server, "query_gpu_memory", return_value=gpu_memory),
+            patch.object(model_server, "cuda_runtime_error", return_value="torch.cuda.is_available() is False."),
+        ):
+            with self.assertRaisesRegex(model_server.ModelServerError, "torch.cuda.is_available"):
+                model_server.auto_select_gpus(required_count=1, min_free_memory_mb=80000)
 
     def test_auto_select_skips_gpus_below_vllm_memory_fraction(self) -> None:
         gpu_memory = [(0, 24000, 95000), (2, 88000, 95000)]
@@ -379,6 +417,29 @@ class EvaluationCheckpointTest(unittest.TestCase):
         self.assertIn("Likely root cause", summary)
         self.assertIn("Free memory on device", summary)
         self.assertIn("Last log lines", summary)
+
+    def test_vllm_log_summary_ignores_previous_startup_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / "vllm.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "=== vLLM command ===",
+                        "vllm serve old-model",
+                        "RuntimeError: old startup failed because TRANSFORMERS_CACHE was set",
+                        "=== vLLM command ===",
+                        "vllm serve new-model",
+                        "CUDA_VISIBLE_DEVICES=1",
+                        "HF_HUB_DISABLE_XET=1",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            summary = model_server.summarize_vllm_log(log_path)
+
+        self.assertNotIn("TRANSFORMERS_CACHE", summary)
+        self.assertIn("vllm serve new-model", summary)
 
     def test_malformed_json_is_reported_as_checker_error(self) -> None:
         with self.assertRaisesRegex(CheckerError, "valid JSON"):
